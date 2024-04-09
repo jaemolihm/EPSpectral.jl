@@ -3,6 +3,18 @@ uuid = "156663f6-0b4c-4138-975b-20c69cfd5e8b"
 authors = ["Jae-Mo Lihm <jaemolim96@gmail.com> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+FastLapackInterface = "29a986be-02c6-4525-aec4-84b980013641"
+HCubature = "19dc6840-f33b-545b-b366-655c7e3ffd49"
+Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LsqFit = "2fda8390-95c7-5789-9bda-21331edee243"
+Peaks = "18e31ff7-3703-566c-8e60-38913d67486b"
+QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
+SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
 [compat]
 julia = "1.10"
 
