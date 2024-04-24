@@ -8,11 +8,16 @@ module EPSpectral
         using StaticArrays
         using OhMyThreads
         using ChunkSplitters
+        using PolyLog
+        using Interpolations
+        using QuadGK
+        using Roots
     end
 
     include("kpoints.jl")
     include("kramers_kronig.jl")
     include("frohlich.jl")
+    include("solver.jl")
 
     @compile_workload begin
         α = 1.0
@@ -42,6 +47,9 @@ module EPSpectral
         FrohlichModel,
         get_εk,
         get_Σ_analytic,
-        get_Σ_mesh
+        get_Σ_mesh,
+        FrohlichSolver,
+        compute_self_energy_analytic!, compute_spectral_function!, compute_occupation!,
+        plot_spectral_function!, update_chemical_potential!
 
 end

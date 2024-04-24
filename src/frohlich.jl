@@ -15,28 +15,74 @@ get_εk(k, param::FrohlichModel) = norm(k)^2 / 2 / param.m
 
 Base.Broadcast.broadcastable(param::FrohlichModel) = Ref(param)
 
+function L(z1, z2)
+    # Eq.(41) of Ref.[1]. (Typos on the sign of second and third terms fixed)
+    li2((1 + z1) / (1 + z2)) + li2((1 + z1) / (1 - z2)) - li2((1 - z1) / (1 + z2)) - li2((1 - z1) / (1 - z2))
+end
+
 
 """
     get_Σ_analytic(k, ω, param::FrohlichModel)
 
 The retarded self-energy of the undoped Frohlich model (equals the greater self-energy),
 computed using the analytic formula.
-Implements Eq.(28) of Ref.[1]. (The π in the denominator is a typo and is removed.)
+For μ < 0, use Eq.(28) of Ref.[1]. (The π in the denominator is a typo and is removed.)
+For μ > 0, use Eq.(39-42) of Ref.[1]. (The π in the denominator is a typo and is removed.)
 """
 function get_Σ_analytic(k, ω, param::FrohlichModel)
-    if param.μ !== -Inf
-        @warn "Analytic formula is only implemented for μ = -∞. Using the μ = -∞ formula."
-    end
-
+    (; ω₀, α, μ) = param
     εk = get_εk(k, param)
-    (; ω₀, α) = param
-    if εk < eps(typeof(εk))
-        # Case k = 0
-        -im * α * ω₀^1.5 / sqrt(ω - ω₀)
+
+    if μ < 0
+        if εk < eps(typeof(εk))
+            # Case k = 0
+            return -im * α * ω₀^1.5 / √(ω - ω₀)
+        else
+            # Case k /= 0
+            return -im * α * ω₀^1.5 / (2 * √(εk)) * log((√(ω - ω₀) + √(εk)) / (√(ω - ω₀) - √(εk)))
+        end
     else
-        # Case k /= 0
-        -im * α * ω₀^1.5 / (2 * sqrt(εk)) * log((sqrt(ω - ω₀) + sqrt(εk)) / (sqrt(ω - ω₀) - sqrt(εk)))
+        if εk < eps(typeof(εk))
+            # Eq.(B9) of Ref.[1]
+            Σles = log((√(conj(ω) + ω₀) + √(μ)) / (√(conj(ω) + ω₀) - √(μ))) / √(conj(ω) + ω₀)
+
+            # Eq.(B11) of Ref.[1]
+            Σgtr = -(log((√(ω - ω₀) + √(μ)) / (√(ω - ω₀) - √(μ))) + im * π) / √(ω - ω₀)
+
+            return (conj(Σles) + Σgtr) * α * ω₀^1.5 / π
+        else
+            # Eq.(39) of Ref.[1] without the last Σ(E_F) term
+            Σles = -(
+                L(√(μ / εk), √((conj(ω) + ω₀) / εk))
+                + log((conj(ω) + ω₀ - μ) / (conj(ω) + ω₀ - εk)) * log(abs((√(μ) + √(εk)) / (√(μ) - √(εk))))
+            )
+
+            # Eq.(42) of Ref.[1] without the last Σ(E_F) term
+            # (Typo on the sign of the denominator in the second term fixed)
+            Σgtr = (
+                L(√(μ / εk), √((ω - ω₀) / εk))
+                + log((ω - ω₀ - μ) / (ω - ω₀ - εk)) * log(abs((√(μ) + √(εk)) / (√(μ) - √(εk))))
+                - im * π * log((√(ω - ω₀) + √(εk)) / (√(ω - ω₀) - √(εk)))
+            )
+
+            return (conj(Σles) + Σgtr) * α * ω₀^1.5 / 2π / √(εk)
+        end
+
     end
+end
+
+@inline function retarded_self_energy_single_pole(ω :: Float64, zkq :: ComplexF64, ωq :: Float64, μ :: Float64)
+    Σ = 0.0im
+    if real(ω) > μ + ωq
+        Σ += 1 / (ω - zkq - ωq)
+    elseif real(ω) < μ - ωq
+        Σ += 1 / (ω - zkq + ωq)
+    end
+    if isfinite(μ)
+        Σ += imag(log((zkq - μ) / (ω - μ - ωq)) / (ω - zkq - ωq)) / π
+        Σ -= imag(log((zkq - μ) / (ω - μ + ωq)) / (ω - zkq + ωq)) / π
+    end
+    Σ
 end
 
 
@@ -47,37 +93,42 @@ Retarded self-energy of the undoped Frohlich model (equals the greater self-ener
 computed by numerical summation on the mesh `qpts`.
 Implements Eq.(13) of Ref.[1] with `g(q)` from Eq.(2).
 """
-function get_Σ_mesh(k :: T, ω, qpts :: Kpoints{T}, param :: FrohlichModel) where {T}
+function get_Σ_mesh(k :: T, ω, qpts :: Kpoints{T}, param :: FrohlichModel; linewidth_on_electron = true) where {T}
     (; α, ω₀, m, μ) = param
 
     Σ = tmapreduce(+, 1:length(qpts)) do iq
         q, weight = qpts[iq]
 
-        val = zero(complex(ω))
+        Σq = zero(complex(ω))
 
         if norm(q) > sqrt(eps(Float64))
             εkq = get_εk(k .+ q, param)
             factor = 1 / norm(q)^2 * weight
-            val = zero(complex(ω))
-            if real(ω) > μ + ω₀
-                val += 1 / (ω - εkq - ω₀) * factor
-            elseif real(ω) < μ - ω₀
-                val += 1 / (ω - εkq + ω₀) * factor
+
+            if linewidth_on_electron
+                # imag(ω) is linewidth of electrons
+                Σq = retarded_self_energy_single_pole(real(ω), εkq - im * imag(ω), ω₀, μ)
+
+            else
+                # imag(ω) is linewidth of phonons
+                if εkq > μ
+                    Σq += 1 / (ω - εkq - ω₀)
+                elseif εkq < μ
+                    Σq += 1 / (ω - εkq + ω₀)
+                end
             end
-            if isfinite(μ)
-                val += imag(log((εkq - μ) / (ω - μ - ω₀)) / (ω - εkq - ω₀)) / π * factor
-                val -= imag(log((εkq - μ) / (ω - μ + ω₀)) / (ω - εkq + ω₀)) / π * factor
-            end
+
+            Σq *= factor
         end
 
-        val
+        Σq
     end
     Σ *= α * sqrt(ω₀^3 / 2m) / (2 * π^2)
     Σ
 end
 
 
-function get_Σ_mesh(k :: T, ωs :: AbstractVector, qpts :: Kpoints{T}, param :: FrohlichModel) where {T}
+function get_Σ_mesh(k :: T, ωs :: AbstractVector, qpts :: Kpoints{T}, param :: FrohlichModel; linewidth_on_electron = true) where {T}
     (; α, ω₀, m, μ) = param
 
     Σ = tmapreduce(.+, chunks(1:length(qpts); n = 2 * Threads.nthreads()); chunking = false) do iqs
@@ -94,13 +145,18 @@ function get_Σ_mesh(k :: T, ωs :: AbstractVector, qpts :: Kpoints{T}, param ::
             factor = 1 / norm(q)^2 * weight
 
             for (iω, ω) in enumerate(ωs)
-                if real(ω) > μ + ω₀
-                    Σ_tmp[iω] += imag(1 / (ω - εkq - ω₀)) * factor
-                elseif real(ω) < μ - ω₀
-                    Σ_tmp[iω] += imag(1 / (ω - εkq + ω₀)) * factor
+                if linewidth_on_electron
+                    # imag(ω) is linewidth of electrons
+                    Σ_tmp[iω] += retarded_self_energy_single_pole(real(ω), εkq - im * imag(ω), ω₀, μ) * factor
+
+                else
+                    # imag(ω) is linewidth of phonons
+                    if εkq > μ
+                        Σ_tmp[iω] += 1 / (ω - εkq - ω₀) * factor
+                    elseif εkq < μ
+                        Σ_tmp[iω] += 1 / (ω - εkq + ω₀) * factor
+                    end
                 end
-                # Σ_tmp[iω] += imag(log((εkq - μ) / (ω - μ - ω₀)) / (ω - εkq - ω₀)) / π * factor
-                # Σ_tmp[iω] -= imag(log((εkq - μ) / (ω - μ + ω₀)) / (ω - εkq + ω₀)) / π * factor
             end
         end
 
@@ -108,7 +164,5 @@ function get_Σ_mesh(k :: T, ωs :: AbstractVector, qpts :: Kpoints{T}, param ::
     end
     Σ *= α * sqrt(ω₀^3 / 2m) / (2 * π^2)
 
-    Σ_real = kramers_kronig(real.(ωs), Σ; tail = false)
-
-    return Σ_real .+ im .* Σ
+    return Σ
 end

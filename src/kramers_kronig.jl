@@ -1,5 +1,5 @@
 
-function kramers_kronig(ωs, ys; tail = true)
+function kramers_kronig(ωs, ys; tail = false)
     dω = ωs[2] - ωs[1]
     ys_out = zeros(length(ωs))
 
