@@ -4,8 +4,11 @@ struct Kpoints{T}
     weights :: Vector{Float64}
 end
 
+# Indexing and iteration interface
 Base.length(k :: Kpoints) = length(k.vectors)
 Base.getindex(k :: Kpoints, i::Int) = (k.vectors[i], k.weights[i])
+Base.firstindex(k :: Kpoints) = 1
+Base.lastindex(k :: Kpoints) = length(k)
 Base.iterate(k :: Kpoints, i = 1) = i > length(k) ? nothing : (k[i], i + 1)
 
 

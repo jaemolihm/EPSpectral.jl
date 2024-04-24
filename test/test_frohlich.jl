@@ -22,8 +22,8 @@ using Test
 end
 
 @testset "Frohlich" begin
-    α, ω0, m = 2.0, 1.0, 0.5
-    model = FrohlichModel(α, ω0, m)
+    α, ω0, m, μ = 2.0, 1.0, 0.5, -Inf
+    model = FrohlichModel(α, ω0, m, μ)
 
     k = (0.5, 0.3, 0.2)
     @test get_εk(0.0, model) ≈ 0.0^2 / 2m
