@@ -12,6 +12,8 @@ module EPSpectral
         using Interpolations
         using QuadGK
         using Roots
+        using NLsolve
+        using Base.Threads
     end
 
     include("kpoints.jl")
@@ -50,6 +52,6 @@ module EPSpectral
         get_Σ_mesh,
         FrohlichSolver,
         compute_self_energy_analytic!, compute_spectral_function!, compute_occupation!,
-        plot_spectral_function!, update_chemical_potential!
+        plot_spectral_function!, update_chemical_potential!, plot_self_energy!
 
 end
