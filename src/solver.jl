@@ -1,5 +1,7 @@
-mutable struct FrohlichSolver
-    model :: FrohlichModel
+abstract type AbstractSolver end
+
+mutable struct ElectronPhononSolver{MT} <: AbstractSolver
+    model :: MT
     η :: Float64
     T :: Float64
     occupation :: Float64
@@ -17,7 +19,9 @@ mutable struct FrohlichSolver
     spectral_occ :: Vector{Float64}
 end
 
-function FrohlichSolver(model, ωs, ks; occupation, ωs_dense = ωs, ks_dense = ks, η, T = 1e-5)
+const FrohlichSolver = ElectronPhononSolver{FrohlichModel}
+
+function ElectronPhononSolver(model, ωs, ks; occupation, ωs_dense = ωs, ks_dense = ks, η, T = 1e-5)
     Σs = zeros(ComplexF64, length(ωs), length(ks))
     As = zeros(length(ωs), length(ks))
     Σs_dense = zeros(ComplexF64, length(ωs_dense), length(ks_dense))
@@ -25,19 +29,19 @@ function FrohlichSolver(model, ωs, ks; occupation, ωs_dense = ωs, ks_dense = 
     spectral_sum = zeros(length(ks_dense))
     spectral_occ = zeros(length(ks_dense))
 
-    FrohlichSolver(model, η, T, occupation, ωs, ks, ωs_dense, ks_dense,
+    ElectronPhononSolver(model, η, T, occupation, ωs, ks, ωs_dense, ks_dense,
         Σs, As, Σs_dense, As_dense, spectral_sum, spectral_occ)
 end
 
-function Base.show(io :: IO, S :: FrohlichSolver)
-    print(io, "FrohlichSolver(", S.model, ", η = ", S.η, ", T = ", S.T, ")\n")
+function Base.show(io :: IO, S :: ElectronPhononSolver)
+    print(io, "ElectronPhononSolver(", S.model, ", η = ", S.η, ", T = ", S.T, ")\n")
     print(io, "ωs       : ", length(S.ωs), " points, ", S.ωs, "\n")
     print(io, "ks       : ", length(S.ks), " points, ", S.ks, "\n")
     print(io, "ωs_dense : ", length(S.ωs_dense), " points, ", S.ωs_dense, "\n")
     print(io, "ks_dense : ", length(S.ks_dense), " points, ", S.ks_dense)
 end
 
-function compute_self_energy_analytic!(S :: FrohlichSolver)
+function compute_self_energy_analytic!(S :: ElectronPhononSolver)
     for (ik, k) in enumerate(S.ks)
         S.Σs[:, ik] .= get_Σ_analytic.(k, S.ωs .+ im * S.η, S.model)
     end
@@ -45,7 +49,7 @@ function compute_self_energy_analytic!(S :: FrohlichSolver)
     return S
 end
 
-function compute_spectral_function!(S :: FrohlichSolver)
+function compute_spectral_function!(S :: AbstractSolver)
     # Interpolate the self-energy from (ωs, ks) to (ωs_dense, ks_dense)
     Σ_itp = linear_interpolation((S.ωs, S.ks), S.Σs; extrapolation_bc = Flat());
 
@@ -59,7 +63,7 @@ function compute_spectral_function!(S :: FrohlichSolver)
 end
 
 
-function compute_occupation!(S :: FrohlichSolver)
+function compute_occupation!(S :: ElectronPhononSolver)
     dω = S.ωs_dense[2] - S.ωs_dense[1]
     fermi = @. 1 / (exp((S.ωs_dense - S.model.μ) / S.T) + 1)
 
@@ -86,7 +90,7 @@ function compute_occupation!(S :: FrohlichSolver)
 end
 
 
-function compute_occupation(S :: FrohlichSolver, μ)
+function compute_occupation(S :: ElectronPhononSolver, μ)
     # Same as compute_occupation!, but do not update S.spectral_occ
 
     dω = S.ωs_dense[2] - S.ωs_dense[1]
@@ -108,7 +112,7 @@ function compute_occupation(S :: FrohlichSolver, μ)
     return n
 end
 
-function plot_spectral_function!(ax, S :: FrohlichSolver;
+function plot_spectral_function!(ax, S :: ElectronPhononSolver;
     bare_band = true,
     chemical_potential = true,
     kwargs_plot...
@@ -132,7 +136,7 @@ function plot_spectral_function!(ax, S :: FrohlichSolver;
     return img
 end
 
-function plot_self_energy!(ax, S :: FrohlichSolver, term = :real;
+function plot_self_energy!(ax, S :: ElectronPhononSolver, term = :real;
     bare_band = true,
     chemical_potential = true,
     kwargs_plot...
@@ -177,16 +181,16 @@ end
 
 
 
-function flatten(S :: FrohlichSolver)
+function flatten(S :: ElectronPhononSolver)
     return flatten!(S, zeros(eltype(S.Σs), length(S.Σs)))
 end
 
-function flatten!(S :: FrohlichSolver, x)
+function flatten!(S :: ElectronPhononSolver, x)
     x[1:length(S.Σs)] .= S.Σs[:]
     return x
 end
 
-function unflatten!(S :: FrohlichSolver, x)
+function unflatten!(S :: ElectronPhononSolver, x)
     S.Σs .= reshape(x[1:length(S.Σs)], size(S.Σs))
 
     # Impose Im Σ < 0
@@ -200,7 +204,7 @@ end
 
 
 
-function compute_self_energy_self_consistent!(S :: FrohlichSolver, qpts :: Kpoints)
+function compute_self_energy_self_consistent!(S :: ElectronPhononSolver{FrohlichModel}, qpts :: Kpoints)
     (; α, ω₀, m, μ) = S.model
     Σ_itp = linear_interpolation((S.ωs, S.ks), S.Σs .- im .* S.η; extrapolation_bc = Flat());
 
@@ -288,7 +292,7 @@ function ep_solve!(
     return res
 end
 
-function iterate_solver!(S :: FrohlichSolver, qpts :: Kpoints)
+function iterate_solver!(S :: ElectronPhononSolver, qpts :: Kpoints)
     @time compute_self_energy_self_consistent!(S, qpts);
     compute_spectral_function!(S)
     nocc = compute_occupation!(S)
@@ -301,6 +305,19 @@ function iterate_solver!(S :: FrohlichSolver, qpts :: Kpoints)
     # plotaxes[4, iter].axhline(1, c="k", lw=1, ls="--")
     # plotaxes[4, iter].set_ylim([0, 1.2])
     # # display(fig)
+
+    # update_chemical_potential!(S)
+    @info "occupation = $nocc, μ = $(S.model.μ)"
+end
+
+
+
+function iterate_solver!(S :: AbstractSolver; callback = identity, kwargs_self_energy...)
+    @time compute_self_energy!(S; kwargs_self_energy...);
+    compute_spectral_function!(S)
+    compute_occupation!(S)
+
+    callback(S)
 
     # update_chemical_potential!(S)
     @info "occupation = $nocc, μ = $(S.model.μ)"

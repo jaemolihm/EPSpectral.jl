@@ -13,7 +13,7 @@ Base.iterate(k :: Kpoints, i = 1) = i > length(k) ? nothing : (k[i], i + 1)
 
 
 """
-    polynomial_grid_1d(n, kmax, order = 1)
+    polynomial_grid_1d(kmax, n, order = 1)
 Generate a 1D grid with polynomial spacing in [-kmax, kmax].
 For n = 2m - 1: ``k[i+m] = kmax * (i / (m - 1))^order``  (i = 1, ..., m - 1)
 For n = 2m    : ``k[i+m] = kmax * ((i - 1/2) / (m - 1/2))^order`` (i = 1, ..., m)
@@ -36,12 +36,19 @@ function polynomial_grid_1d(kmax, n :: Int, order :: Int = 1)
 end
 
 
-
+"""
+    polynomial_grid_3d(kmax, n, order = 1)
+Generate a 3D grid with polynomial spacing in each directions inside the sphere with radius
+kmax.
+"""
 function polynomial_grid_3d(kmax, n :: Int, order :: Int = 1)
     kpts_1d = polynomial_grid_1d(kmax, n, order)
     vectors_1d, weights_1d = kpts_1d.vectors, kpts_1d.weights
 
     vectors = vec(SVector.(collect(Iterators.product(vectors_1d, vectors_1d, vectors_1d))))
     weights = vec(prod.(collect(Iterators.product(weights_1d, weights_1d, weights_1d))))
-    Kpoints(vectors, weights)
+
+    # Filter out k points with |k| > kmax
+    inds = norm.(vectors) .<= kmax
+    Kpoints(vectors[inds], weights[inds])
 end

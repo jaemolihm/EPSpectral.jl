@@ -1,5 +1,6 @@
 using EPSpectral
 using StaticArrays
+using LinearAlgebra
 using Test
 
 @testset "Kpoints" begin
@@ -18,7 +19,9 @@ using Test
     @test kpts.vectors ≈ kmax .* [-1, -1/4, 0, 1/4, 1]
     @test kpts.weights ≈ kmax .* [1/2, 1/2, 1/4, 1/2, 1/2]
 
-    @test polynomial_grid_3d(kmax, 6, 3) isa Kpoints{SVector{3, Float64}}
+    kpts = polynomial_grid_3d(kmax, 6, 3)
+    @test kpts isa Kpoints{SVector{3, Float64}}
+    @test all(norm.(kpts.vectors) .<= kmax)
 end
 
 @testset "Frohlich" begin
@@ -40,15 +43,15 @@ end
 
     # Test numerical integration on the mesh
 
-    qpts = polynomial_grid_3d(10.0, 100, 4)
+    qpts = polynomial_grid_3d(15.0, 100, 4)
 
     k = 0.0
     ω = k^2 / 2m + 0.05im
-    @test get_Σ_mesh(SVector(k, 0, 0), ω, qpts, model) ≈ -1.920196297257901 - 0.05084258853761856im
+    @test get_Σ_mesh(SVector(k, 0, 0), ω, qpts, model) ≈ -1.9432408368379066 - 0.05108721482214386im
     @test get_Σ_mesh(SVector(k, 0, 0), ω, qpts, model) ≈ get_Σ_analytic(k, ω, model) atol=1e-1
 
     k = 2.0
     ω = k^2 / 2m + 0.2im
-    @test get_Σ_mesh(SVector(k, 0, 0), ω, qpts, model) ≈ -1.3657738696572959 - 1.3259616500826146im
+    @test get_Σ_mesh(SVector(k, 0, 0), ω, qpts, model) ≈ -1.3822449385409892 - 1.3298515254158005im
     @test get_Σ_mesh(SVector(k, 0, 0), ω, qpts, model) ≈ get_Σ_analytic(k, ω, model) atol=1e-1
 end

@@ -50,7 +50,7 @@ module EPSpectral
         get_εk,
         get_Σ_analytic,
         get_Σ_mesh,
-        FrohlichSolver,
+        ElectronPhononSolver,
         compute_self_energy_analytic!, compute_spectral_function!, compute_occupation!,
         plot_spectral_function!, update_chemical_potential!, plot_self_energy!
 
