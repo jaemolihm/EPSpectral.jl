@@ -20,6 +20,7 @@ module EPSpectral
     include("kramers_kronig.jl")
     include("frohlich.jl")
     include("solver.jl")
+    include("solver_frohlich.jl")
 
     @compile_workload begin
         α = 1.0
