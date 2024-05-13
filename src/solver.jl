@@ -1,16 +1,16 @@
 abstract type AbstractSolver end
 
 
-function flatten(S :: ElectronPhononSolver)
+function flatten(S :: AbstractSolver)
     return flatten!(S, zeros(eltype(S.Σs), length(S.Σs)))
 end
 
-function flatten!(S :: ElectronPhononSolver, x)
+function flatten!(S :: AbstractSolver, x)
     x[1:length(S.Σs)] .= S.Σs[:]
     return x
 end
 
-function unflatten!(S :: ElectronPhononSolver, x)
+function unflatten!(S :: AbstractSolver, x)
     S.Σs .= reshape(x[1:length(S.Σs)], size(S.Σs))
 
     # Impose Im Σ < 0

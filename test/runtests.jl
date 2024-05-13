@@ -3,4 +3,5 @@ using Test
 
 @testset "EPSpectral.jl" begin
     include("test_frohlich.jl")
+    include("test_kramers_kronig.jl")
 end
