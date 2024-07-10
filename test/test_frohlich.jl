@@ -4,22 +4,28 @@ using LinearAlgebra
 using Test
 
 @testset "Kpoints" begin
+    using EPSpectral: get_dimension
+
     kmax = 3.0
     for n in [4, 7]
         kpts = polynomial_grid_1d(kmax, n, 1)
+        @test get_dimension(kpts) == 1
         @test kpts.vectors ≈ range(-kmax, kmax, length=n)
         @test kpts.weights ≈ fill(2kmax / (n - 1), n)
     end
 
     kpts = polynomial_grid_1d(kmax, 4, 2)
+    @test get_dimension(kpts) == 1
     @test kpts.vectors ≈ kmax .* [-1, -1/9, 1/9, 1]
     @test kpts.weights ≈ kmax .* [5/9, 5/9, 5/9, 5/9]
 
     kpts = polynomial_grid_1d(kmax, 5, 2)
+    @test get_dimension(kpts) == 1
     @test kpts.vectors ≈ kmax .* [-1, -1/4, 0, 1/4, 1]
     @test kpts.weights ≈ kmax .* [1/2, 1/2, 1/4, 1/2, 1/2]
 
     kpts = polynomial_grid_3d(kmax, 6, 3)
+    @test get_dimension(kpts) == 3
     @test kpts isa Kpoints{SVector{3, Float64}}
     @test all(norm.(kpts.vectors) .<= kmax)
 end
