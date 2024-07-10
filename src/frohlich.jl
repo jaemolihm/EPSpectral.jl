@@ -18,13 +18,22 @@ struct FrohlichModel_2D
     μ  :: Float64
 end
 
+Base.Broadcast.broadcastable(param::FrohlichModel) = Ref(param)
+Base.Broadcast.broadcastable(param::FrohlichModel_2D) = Ref(param)
+
 get_εk(k, param::FrohlichModel) = norm(k)^2 / 2 / param.m
 get_εk(k, param::FrohlichModel_2D) = norm(k)^2 / 2 / param.m
 
 get_vk(k, param::FrohlichModel) = k / param.m
 
-Base.Broadcast.broadcastable(param::FrohlichModel) = Ref(param)
-Base.Broadcast.broadcastable(param::FrohlichModel_2D) = Ref(param)
+function get_eph_g(q, model :: FrohlichModel)
+    (; α, ω₀, m) = model
+    if norm(q) == 0
+        return 0.0
+    else
+        return sqrt(4π * α * sqrt(ω₀^3 / 2m)) / norm(q)
+    end
+end
 
 function L(z1, z2)
     # Eq.(41) of Ref.[1]. (Typos on the sign of second and third terms fixed)

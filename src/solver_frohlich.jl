@@ -233,8 +233,9 @@ function update_chemical_potential!(S)
 end
 
 
-function compute_self_energy!(S :: ElectronPhononSolver{FrohlichModel})
-    (; α, ω₀, m, μ) = S.model
+function compute_self_energy!(S :: ElectronPhononSolver)
+    (; ω₀, μ) = S.model
+    dim = get_dimension(S.qpts)
     Σ_itp = get_Σ_itp_dense(S, S.η)
 
     for (ik, k) in enumerate(S.ks)
@@ -247,16 +248,12 @@ function compute_self_energy!(S :: ElectronPhononSolver{FrohlichModel})
                 kq = norm(SVector(k, 0, 0) + q)
                 ωq = ω₀
                 nq = occ_boson(ωq, S.T)
+                gq = get_eph_g(q, S.model)
 
-                if norm(q) == 0
-                    g² = 0.0
-                else
-                    g² = 4π * α * sqrt(ω₀^3 / 2m) / norm(q)^2
-                end
-                factor = weight * g²
+                factor = weight * abs2(gq)
 
                 for (iω, ω) in enumerate(S.ωs)
-                    if S.T < 1e-4 * ω₀
+                    if nq < sqrt(eps(ω₀))
                         if real(ω) > μ + ωq
                             Σs_imag_q[iω] += imag(1 / (ω - ωq - εkq - Σ_itp(ω - ωq, kq))) * factor
                         elseif real(ω) < μ - ωq
@@ -275,8 +272,7 @@ function compute_self_energy!(S :: ElectronPhononSolver{FrohlichModel})
             Σs_imag_q
         end :: Vector{Float64}
 
-
-        Σs_imag .*= 1 / (2π)^3
+        Σs_imag .*= 1 / (2π)^dim
         Σs_real = kramers_kronig(real.(S.ωs), Σs_imag)
 
         S.Σs[:, ik] .= Σs_real .+ im .* Σs_imag

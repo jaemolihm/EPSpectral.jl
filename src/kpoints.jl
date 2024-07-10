@@ -11,6 +11,8 @@ Base.firstindex(k :: Kpoints) = 1
 Base.lastindex(k :: Kpoints) = length(k)
 Base.iterate(k :: Kpoints, i = 1) = i > length(k) ? nothing : (k[i], i + 1)
 
+get_dimension(k :: Kpoints) = length(k.vectors[1])
+
 
 """
     polynomial_grid_1d(kmax, n, order = 1)
