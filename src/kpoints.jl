@@ -35,6 +35,23 @@ function polynomial_grid_1d(kmax, n :: Int, order :: Int = 1)
     Kpoints(ks, weights)
 end
 
+"""
+    polynomial_grid_2d(kmax, n, order = 1)
+Generate a 2D grid with polynomial spacing in each directions inside the sphere with radius
+kmax.
+"""
+function polynomial_grid_2d(kmax, n :: Int, order :: Int = 1)
+    kpts_1d = polynomial_grid_1d(kmax, n, order)
+    vectors_1d, weights_1d = kpts_1d.vectors, kpts_1d.weights
+
+    vectors = vec(SVector.(collect(Iterators.product(vectors_1d, vectors_1d))))
+    weights = vec(prod.(collect(Iterators.product(weights_1d, weights_1d))))
+
+    # Filter out k points with |k| > kmax
+    inds = norm.(vectors) .<= kmax
+    Kpoints(vectors[inds], weights[inds])
+end
+
 
 """
     polynomial_grid_3d(kmax, n, order = 1)

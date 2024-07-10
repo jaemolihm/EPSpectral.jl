@@ -17,6 +17,9 @@ function unflatten!(S :: AbstractSolver, x)
     inds = imag.(S.Σs) .>= 0
     S.Σs[inds] .= real.(S.Σs[inds]) .+ 0.0im
 
+    # Update S.Σs_dense and S.As_dense
+    compute_spectral_function!(S)
+
     return S
 end
 
@@ -88,11 +91,7 @@ function iterate_solver!(
 
     S.iter += 1
 
-    if verbose
-        @time compute_self_energy!(S; kwargs_self_energy...)
-    else
-        compute_self_energy!(S; kwargs_self_energy...)
-    end
+    compute_self_energy!(S; kwargs_self_energy...)
     compute_spectral_function!(S)
     nocc = compute_occupation!(S)
 
@@ -102,9 +101,9 @@ function iterate_solver!(
         update_chemical_potential!(S)
     end
 
-    if verbose
-        @info "occupation = $nocc, μ = $(S.model.μ)"
-    end
+    # if verbose
+    #     @info "occupation = $nocc, μ = $(S.model.μ)"
+    # end
 
     S
 end

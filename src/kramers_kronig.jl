@@ -4,6 +4,8 @@
 Calculate the Kramers-Kronig transformation of a given function such that `ys + im * zs` is
 a retarded function (i.e., analytic in the upper half of the complex plane).
 
+y(ω) = 1/π ∫dω' z(ω') / (ω' - ω)
+
 # Input
 - `ωs`: Grid of frequencies on which the function is defined.
 - `zs`: Imaginary part of a retarded function.

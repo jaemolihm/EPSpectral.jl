@@ -16,11 +16,16 @@ module EPSpectral
         using Base.Threads
     end
 
+    include("utils.jl")
     include("kpoints.jl")
     include("kramers_kronig.jl")
     include("frohlich.jl")
     include("solver.jl")
     include("solver_frohlich.jl")
+    include("frohlich_phself.jl")
+    include("linear_spline_basis.jl")
+    include("current_vertex.jl")
+    include("cumulant.jl")
 
     @compile_workload begin
         α = 1.0
@@ -44,15 +49,16 @@ module EPSpectral
 
     export
         Kpoints,
-        polynomial_grid_1d,
-        polynomial_grid_3d,
+        polynomial_grid_1d, polynomial_grid_2d, polynomial_grid_3d,
         kramers_kronig,
         FrohlichModel,
-        get_εk,
+        get_εk, get_vk,
         get_Σ_analytic,
         get_Σ_mesh,
         ElectronPhononSolver,
+        get_Σ_itp, get_Σ_itp_dense,
         compute_self_energy_analytic!, compute_spectral_function!, compute_occupation!,
-        plot_spectral_function!, update_chemical_potential!, plot_self_energy!
+        plot_spectral_function!, update_chemical_potential!, plot_self_energy!,
+        LinearSplineBasis
 
 end

@@ -9,8 +9,12 @@ mutable struct ElectronPhononSolver{MT, VT} <: AbstractSolver
 
     qpts :: Kpoints{VT}
 
-    ωs :: StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}
-    ks :: StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}
+    # ωs and ks are a Vector so they can be nonuniform.
+    # ωs_dense and ks_dense are a StepRangeLen so linear interpolation over them are efficient.
+
+    # ωs :: StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}
+    ωs :: Vector{Float64}
+    ks :: Vector{Float64}
     ωs_dense :: StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}
     ks_dense :: StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}
     Σs :: Matrix{ComplexF64}
@@ -18,13 +22,19 @@ mutable struct ElectronPhononSolver{MT, VT} <: AbstractSolver
     Σs_dense :: Matrix{ComplexF64}
     As_dense :: Matrix{Float64}
 
+    Σs_rest :: Vector{ComplexF64}
+
     spectral_sum :: Vector{Float64}
     spectral_occ :: Vector{Float64}
 end
 
 const FrohlichSolver = ElectronPhononSolver{FrohlichModel}
 
-function ElectronPhononSolver(model, ωs, ks, qpts; occupation, ωs_dense = ωs, ks_dense = ks, η, T = 1e-5)
+function ElectronPhononSolver(model, ωs_, ks_, qpts; occupation, ωs_dense = ωs, ks_dense = ks, η, T = 1e-5, Σs_rest = nothing)
+    # Convert ranges to vectors
+    ωs = Vector(ωs_)
+    ks = Vector(ks_)
+
     Σs = zeros(ComplexF64, length(ωs), length(ks))
     As = zeros(length(ωs), length(ks))
     Σs_dense = zeros(ComplexF64, length(ωs_dense), length(ks_dense))
@@ -32,8 +42,12 @@ function ElectronPhononSolver(model, ωs, ks, qpts; occupation, ωs_dense = ωs,
     spectral_sum = zeros(length(ks_dense))
     spectral_occ = zeros(length(ks_dense))
 
+    if Σs_rest === nothing
+        Σs_rest = zeros(ComplexF64, length(ks))
+    end
+
     ElectronPhononSolver(0, model, η, T, occupation, qpts, ωs, ks, ωs_dense, ks_dense,
-        Σs, As, Σs_dense, As_dense, spectral_sum, spectral_occ)
+        Σs, As, Σs_dense, As_dense, Σs_rest, spectral_sum, spectral_occ)
 end
 
 function Base.show(io :: IO, S :: ElectronPhononSolver)
@@ -47,20 +61,32 @@ end
 
 function compute_self_energy_analytic!(S :: ElectronPhononSolver)
     for (ik, k) in enumerate(S.ks)
-        S.Σs[:, ik] .= get_Σ_analytic.(k, S.ωs .+ im * S.η, S.model)
+        S.Σs[:, ik] .= get_Σ_analytic.(k, S.ωs .+ im * S.η, S.model, S.T)
     end
 
     return S
 end
 
-function compute_spectral_function!(S :: AbstractSolver)
+function get_Σ_itp(S :: ElectronPhononSolver, η = S.η)
+    linear_interpolation((S.ωs, S.ks), S.Σs .- im .* η; extrapolation_bc = Flat())
+end
+
+function get_Σ_itp_dense(S :: ElectronPhononSolver, η = S.η)
+    linear_interpolation((S.ωs_dense, S.ks_dense), S.Σs_dense .- im .* η; extrapolation_bc = Flat())
+end
+
+"""
+    compute_spectral_function!(S :: AbstractSolver; spectral_smearing = S.η)
+"""
+function compute_spectral_function!(S :: AbstractSolver; spectral_smearing = S.η)
     # Interpolate the self-energy from (ωs, ks) to (ωs_dense, ks_dense)
-    Σ_itp = linear_interpolation((S.ωs, S.ks), S.Σs; extrapolation_bc = Flat());
+    Σ_itp = get_Σ_itp(S, 0)
 
     # Compute spectral function
     @views for (ik, k) in enumerate(S.ks_dense)
         εk = get_εk(k, S.model)
-        @. S.As_dense[:, ik] = -imag(1 / (S.ωs_dense - εk - Σ_itp(S.ωs_dense, k) + im * S.η)) / π
+        @. S.Σs_dense[:, ik] = Σ_itp(S.ωs_dense, k)
+        @. S.As_dense[:, ik] = -imag(1 / (S.ωs_dense - εk - Σ_itp(S.ωs_dense, k) + im * spectral_smearing)) / π
     end
 
     return S
@@ -116,9 +142,32 @@ function compute_occupation(S :: ElectronPhononSolver, μ)
     return n
 end
 
+function compute_occupation_MaxwellBoltzmann(S :: ElectronPhononSolver)
+    # Same as compute_occupation!, but do not update S.spectral_occ
+
+    dω = S.ωs_dense[2] - S.ωs_dense[1]
+    fermi = @. exp(-S.ωs_dense / S.T)
+
+    spectral_occ = zero(S.spectral_occ)
+
+    @views for (ik, k) in enumerate(S.ks_dense)
+        # Compute occupation
+        spectral_occ[ik] = sum(S.As_dense[:, ik] .* fermi) * dω
+    end
+
+    # Linearly interpolate the occupations
+    occ_itp = linear_interpolation(S.ks_dense, spectral_occ)
+
+    # Integrate over the Brillouin zone
+    n = quadgk(k -> 1 / 2π^2 * k^2 * occ_itp(k), extrema(S.ks_dense)...)[1]
+
+    return n
+end
+
 function plot_spectral_function!(ax, S :: ElectronPhononSolver;
     bare_band = true,
     chemical_potential = true,
+    yscale_fac = 1.0,
     kwargs_plot...
     )
 
@@ -126,15 +175,15 @@ function plot_spectral_function!(ax, S :: ElectronPhononSolver;
     ωs = S.ωs_dense
     dk = ks[2] - ks[1]
     dω = ωs[2] - ωs[1]
-    extent = [ks[1] - dk/2, ks[end] + dk/2, ωs[1] - dω/2, ωs[end] + dω/2]
+    extent = [ks[1] - dk/2, ks[end] + dk/2, (ωs[1] - dω/2) * yscale_fac, (ωs[end] + dω/2) * yscale_fac]
 
     img = ax.imshow(S.As_dense; origin="lower", extent, aspect="auto", kwargs_plot...)
 
     if bare_band
-        ax.plot(S.ks_dense, get_εk.(S.ks_dense, S.model), c="grey", ls="--", lw=1)
+        ax.plot(S.ks_dense, get_εk.(S.ks_dense, S.model) .* yscale_fac, c="grey", ls="--", lw=1)
     end
     if chemical_potential
-        ax.axhline(S.model.μ, c="r", ls="--", lw=1)
+        ax.axhline(S.model.μ * yscale_fac, c="r", ls="--", lw=1)
     end
 
     return img
@@ -143,16 +192,17 @@ end
 function plot_self_energy!(ax, S :: ElectronPhononSolver, term = :real;
     bare_band = true,
     chemical_potential = true,
+    yscale_fac = 1.0,
     kwargs_plot...
     )
 
-    Σ_itp = linear_interpolation((S.ωs, S.ks), S.Σs; extrapolation_bc = Flat());
+    Σ_itp = get_Σ_itp(S, 0)
 
     ks = S.ks_dense
     ωs = S.ωs_dense
     dk = ks[2] - ks[1]
     dω = ωs[2] - ωs[1]
-    extent = [ks[1] - dk/2, ks[end] + dk/2, ωs[1] - dω/2, ωs[end] + dω/2]
+    extent = [ks[1] - dk/2, ks[end] + dk/2, (ωs[1] - dω/2) * yscale_fac, (ωs[end] + dω/2) * yscale_fac]
     Σs = [Σ_itp(ω, k) for ω in ωs, k in ks]
 
     func = term == :real ? real : imag
@@ -160,10 +210,10 @@ function plot_self_energy!(ax, S :: ElectronPhononSolver, term = :real;
     img = ax.imshow(func.(Σs); origin="lower", extent, aspect="auto", kwargs_plot...)
 
     if bare_band
-        ax.plot(S.ks_dense, get_εk.(S.ks_dense, S.model), c="grey", ls="--", lw=1)
+        ax.plot(S.ks_dense, get_εk.(S.ks_dense, S.model) .* yscale_fac, c="grey", ls="--", lw=1)
     end
     if chemical_potential
-        ax.axhline(S.model.μ, c="r", ls="--", lw=1)
+        ax.axhline(S.model.μ * yscale_fac, c="r", ls="--", lw=1)
     end
 
     return img
@@ -185,7 +235,7 @@ end
 
 function compute_self_energy!(S :: ElectronPhononSolver{FrohlichModel})
     (; α, ω₀, m, μ) = S.model
-    Σ_itp = linear_interpolation((S.ωs, S.ks), S.Σs .- im .* S.η; extrapolation_bc = Flat());
+    Σ_itp = get_Σ_itp_dense(S, S.η)
 
     for (ik, k) in enumerate(S.ks)
         Σs_imag = tmapreduce(.+, chunks(1:length(S.qpts); n = 2 * Threads.nthreads()); chunking = false) do iqs
@@ -195,8 +245,62 @@ function compute_self_energy!(S :: ElectronPhononSolver{FrohlichModel})
                 q, weight = S.qpts[iq]
                 εkq = get_εk(SVector(k, 0, 0) + q, S.model)
                 kq = norm(SVector(k, 0, 0) + q)
+                ωq = ω₀
+                nq = occ_boson(ωq, S.T)
 
-                factor = weight / norm(q)^2
+                if norm(q) == 0
+                    g² = 0.0
+                else
+                    g² = 4π * α * sqrt(ω₀^3 / 2m) / norm(q)^2
+                end
+                factor = weight * g²
+
+                for (iω, ω) in enumerate(S.ωs)
+                    if S.T < 1e-4 * ω₀
+                        if real(ω) > μ + ωq
+                            Σs_imag_q[iω] += imag(1 / (ω - ωq - εkq - Σ_itp(ω - ωq, kq))) * factor
+                        elseif real(ω) < μ - ωq
+                            Σs_imag_q[iω] += imag(1 / (ω + ωq - εkq - Σ_itp(ω + ωq, kq))) * factor
+                        end
+                    else
+                        # Finite-temperature case
+                        fac1 = imag(1 / (ω + ωq - εkq - Σ_itp(ω + ωq, kq)))
+                        fac2 = imag(1 / (ω - ωq - εkq - Σ_itp(ω - ωq, kq)))
+                        Σs_imag_q[iω] += ( fac1 * (nq + occ_fermion(ω + ωq - μ, S.T))
+                                         + fac2 * (nq + 1 - occ_fermion(ω - ωq - μ, S.T)) ) * factor
+                    end
+                end
+            end
+
+            Σs_imag_q
+        end :: Vector{Float64}
+
+
+        Σs_imag .*= 1 / (2π)^3
+        Σs_real = kramers_kronig(real.(S.ωs), Σs_imag)
+
+        S.Σs[:, ik] .= Σs_real .+ im .* Σs_imag
+        S.Σs[:, ik] .+= S.Σs_rest[ik]
+    end
+
+    return S
+end
+
+
+function compute_self_energy!(S :: ElectronPhononSolver{FrohlichModel_2D})
+    (; α, ω₀, m, μ) = S.model
+    Σ_itp = linear_interpolation((S.ωs, S.ks), S.Σs .- im .* S.η; extrapolation_bc = Flat());
+
+    for (ik, k) in enumerate(S.ks)
+        Σs_imag = tmapreduce(.+, chunks(1:length(S.qpts); n = 2 * Threads.nthreads()); chunking = false) do iqs
+            Σs_imag_q = zeros(length(S.ωs))
+
+            for iq in iqs
+                q, weight = S.qpts[iq]
+                εkq = get_εk(SVector(k, 0) + q, S.model)
+                kq = norm(SVector(k, 0) + q)
+
+                factor = weight / norm(q)
 
                 for (iω, ω) in enumerate(S.ωs)
                     if real(ω) > μ + ω₀
@@ -210,10 +314,11 @@ function compute_self_energy!(S :: ElectronPhononSolver{FrohlichModel})
             Σs_imag_q
         end :: Vector{Float64}
 
-        Σs_imag .*= α * sqrt(ω₀^3 / 2m) / (2 * π^2)
+        Σs_imag .*= α * sqrt(ω₀^3 / 2m) * 4π / (2π)^2
         Σs_real = kramers_kronig(real.(S.ωs), Σs_imag)
 
         S.Σs[:, ik] .= Σs_real .+ im .* Σs_imag
+        S.Σs[:, ik] .+= S.Σs_rest[ik]
     end
 
     return S

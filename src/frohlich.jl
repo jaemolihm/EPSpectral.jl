@@ -11,9 +11,20 @@ struct FrohlichModel
     μ  :: Float64
 end
 
+struct FrohlichModel_2D
+    α  :: Float64
+    ω₀ :: Float64
+    m  :: Float64
+    μ  :: Float64
+end
+
 get_εk(k, param::FrohlichModel) = norm(k)^2 / 2 / param.m
+get_εk(k, param::FrohlichModel_2D) = norm(k)^2 / 2 / param.m
+
+get_vk(k, param::FrohlichModel) = k / param.m
 
 Base.Broadcast.broadcastable(param::FrohlichModel) = Ref(param)
+Base.Broadcast.broadcastable(param::FrohlichModel_2D) = Ref(param)
 
 function L(z1, z2)
     # Eq.(41) of Ref.[1]. (Typos on the sign of second and third terms fixed)
@@ -29,19 +40,27 @@ computed using the analytic formula.
 For μ < 0, use Eq.(28) of Ref.[1]. (The π in the denominator is a typo and is removed.)
 For μ > 0, use Eq.(39-42) of Ref.[1]. (The π in the denominator is a typo and is removed.)
 """
-function get_Σ_analytic(k, ω, param::FrohlichModel)
+function get_Σ_analytic(k, ω, param::FrohlichModel, T = 0.0)
     (; ω₀, α, μ) = param
     εk = get_εk(k, param)
+
+    nq = occ_boson(ω₀, T)
 
     if μ < 0
         if εk < eps(typeof(εk))
             # Case k = 0
-            return -im * α * ω₀^1.5 / √(ω - ω₀)
+            Σ_emi = -im * α * ω₀^1.5 / √(ω - ω₀)
+            Σ_abs = -im * α * ω₀^1.5 / √(ω + ω₀)
         else
             # Case k /= 0
-            return -im * α * ω₀^1.5 / (2 * √(εk)) * log((√(ω - ω₀) + √(εk)) / (√(ω - ω₀) - √(εk)))
+            Σ_emi = -im * α * ω₀^1.5 / (2 * √(εk)) * log((√(ω - ω₀) + √(εk)) / (√(ω - ω₀) - √(εk)))
+            Σ_abs = -im * α * ω₀^1.5 / (2 * √(εk)) * log((√(ω + ω₀) + √(εk)) / (√(ω + ω₀) - √(εk)))
         end
+
+        return Σ_emi * (nq + 1) + Σ_abs * nq
+
     else
+        T > 0 && throw(ArgumentError("μ > 0 and T > 0 not implemented"))
         if εk < eps(typeof(εk))
             # Eq.(B9) of Ref.[1]
             Σles = log((√(conj(ω) + ω₀) + √(μ)) / (√(conj(ω) + ω₀) - √(μ))) / √(conj(ω) + ω₀)
