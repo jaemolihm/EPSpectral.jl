@@ -32,7 +32,8 @@ module EPSpectral
         m = 0.5
         ω₀ = 1.0
         μ = -Inf
-        model = FrohlichModel(α, ω₀, m, μ)
+        T = 0.0
+        model = FrohlichModel(α, ω₀, m, μ, T)
 
         qmax = 5.0
         nq = 10

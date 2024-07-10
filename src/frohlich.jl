@@ -9,6 +9,7 @@ struct FrohlichModel
     ω₀ :: Float64
     m  :: Float64
     μ  :: Float64
+    T  :: Float64
 end
 
 struct FrohlichModel_2D
@@ -16,6 +17,7 @@ struct FrohlichModel_2D
     ω₀ :: Float64
     m  :: Float64
     μ  :: Float64
+    T  :: Float64
 end
 
 Base.Broadcast.broadcastable(param::FrohlichModel) = Ref(param)
@@ -49,8 +51,8 @@ computed using the analytic formula.
 For μ < 0, use Eq.(28) of Ref.[1]. (The π in the denominator is a typo and is removed.)
 For μ > 0, use Eq.(39-42) of Ref.[1]. (The π in the denominator is a typo and is removed.)
 """
-function get_Σ_analytic(k, ω, param::FrohlichModel, T = 0.0)
-    (; ω₀, α, μ) = param
+function get_Σ_analytic(k, ω, param::FrohlichModel)
+    (; ω₀, α, μ, T) = param
     εk = get_εk(k, param)
 
     nq = occ_boson(ω₀, T)
@@ -115,14 +117,14 @@ end
 
 
 """
-    get_Σ_mesh(k, ω, qpts :: Kpoints, param :: FrohlichModel)
+    get_Σ_mesh(k, ω, qpts :: Kpoints, model :: FrohlichModel)
 
 Retarded self-energy of the undoped Frohlich model (equals the greater self-energy),
 computed by numerical summation on the mesh `qpts`.
 Implements Eq.(13) of Ref.[1] with `g(q)` from Eq.(2).
 """
-function get_Σ_mesh(k :: T, ω, qpts :: Kpoints{T}, param :: FrohlichModel; linewidth_on_electron = true) where {T}
-    (; α, ω₀, m, μ) = param
+function get_Σ_mesh(k :: T, ω, qpts :: Kpoints{T}, model :: FrohlichModel; linewidth_on_electron = true) where {T}
+    (; α, ω₀, m, μ) = model
 
     Σ = tmapreduce(+, 1:length(qpts)) do iq
         q, weight = qpts[iq]
@@ -130,7 +132,7 @@ function get_Σ_mesh(k :: T, ω, qpts :: Kpoints{T}, param :: FrohlichModel; lin
         Σq = zero(complex(ω))
 
         if norm(q) > sqrt(eps(Float64))
-            εkq = get_εk(k .+ q, param)
+            εkq = get_εk(k .+ q, model)
             factor = 1 / norm(q)^2 * weight
 
             if linewidth_on_electron
@@ -156,8 +158,8 @@ function get_Σ_mesh(k :: T, ω, qpts :: Kpoints{T}, param :: FrohlichModel; lin
 end
 
 
-function get_Σ_mesh(k :: T, ωs :: AbstractVector, qpts :: Kpoints{T}, param :: FrohlichModel; linewidth_on_electron = true) where {T}
-    (; α, ω₀, m, μ) = param
+function get_Σ_mesh(k :: T, ωs :: AbstractVector, qpts :: Kpoints{T}, model :: FrohlichModel; linewidth_on_electron = true) where {T}
+    (; α, ω₀, m, μ) = model
 
     Σ = tmapreduce(.+, chunks(1:length(qpts); n = 2 * Threads.nthreads()); chunking = false) do iqs
         Σ_tmp = zeros(ComplexF64, length(ωs))
@@ -169,7 +171,7 @@ function get_Σ_mesh(k :: T, ωs :: AbstractVector, qpts :: Kpoints{T}, param ::
                 continue
             end
 
-            εkq = get_εk(k .+ q, param)
+            εkq = get_εk(k .+ q, model)
             factor = 1 / norm(q)^2 * weight
 
             for (iω, ω) in enumerate(ωs)

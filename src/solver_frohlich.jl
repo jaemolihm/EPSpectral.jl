@@ -4,7 +4,6 @@ mutable struct ElectronPhononSolver{MT, VT} <: AbstractSolver
 
     model :: MT
     η :: Float64
-    T :: Float64
     occupation :: Float64
 
     qpts :: Kpoints{VT}
@@ -30,7 +29,7 @@ end
 
 const FrohlichSolver = ElectronPhononSolver{FrohlichModel}
 
-function ElectronPhononSolver(model, ωs_, ks_, qpts; occupation, ωs_dense = ωs, ks_dense = ks, η, T = 1e-5, Σs_rest = nothing)
+function ElectronPhononSolver(model, ωs_, ks_, qpts; occupation, ωs_dense = ωs, ks_dense = ks, η, Σs_rest = nothing)
     # Convert ranges to vectors
     ωs = Vector(ωs_)
     ks = Vector(ks_)
@@ -46,12 +45,12 @@ function ElectronPhononSolver(model, ωs_, ks_, qpts; occupation, ωs_dense = ω
         Σs_rest = zeros(ComplexF64, length(ks))
     end
 
-    ElectronPhononSolver(0, model, η, T, occupation, qpts, ωs, ks, ωs_dense, ks_dense,
+    ElectronPhononSolver(0, model, η, occupation, qpts, ωs, ks, ωs_dense, ks_dense,
         Σs, As, Σs_dense, As_dense, Σs_rest, spectral_sum, spectral_occ)
 end
 
 function Base.show(io :: IO, S :: ElectronPhononSolver)
-    print(io, "ElectronPhononSolver(", S.model, ", η = ", S.η, ", T = ", S.T, ")\n")
+    print(io, "ElectronPhononSolver(", S.model, ", η = ", S.η, ")\n")
     print(io, "qpts     : ", length(S.qpts), " points, ", "\n")
     print(io, "ωs       : ", length(S.ωs), " points, ", S.ωs, "\n")
     print(io, "ks       : ", length(S.ks), " points, ", S.ks, "\n")
@@ -61,7 +60,7 @@ end
 
 function compute_self_energy_analytic!(S :: ElectronPhononSolver)
     for (ik, k) in enumerate(S.ks)
-        S.Σs[:, ik] .= get_Σ_analytic.(k, S.ωs .+ im * S.η, S.model, S.T)
+        S.Σs[:, ik] .= get_Σ_analytic.(k, S.ωs .+ im * S.η, S.model)
     end
 
     return S
@@ -95,7 +94,7 @@ end
 
 function compute_occupation!(S :: ElectronPhononSolver)
     dω = S.ωs_dense[2] - S.ωs_dense[1]
-    fermi = @. 1 / (exp((S.ωs_dense - S.model.μ) / S.T) + 1)
+    fermi = @. 1 / (exp((S.ωs_dense - S.model.μ) / S.model.T) + 1)
 
     @views for (ik, k) in enumerate(S.ks_dense)
         # Compute integral of the spectral function (should be 1 when exact)
@@ -124,7 +123,7 @@ function compute_occupation(S :: ElectronPhononSolver, μ)
     # Same as compute_occupation!, but do not update S.spectral_occ
 
     dω = S.ωs_dense[2] - S.ωs_dense[1]
-    fermi = @. 1 / (exp((S.ωs_dense - μ) / S.T) + 1)
+    fermi = @. 1 / (exp((S.ωs_dense - μ) / S.model.T) + 1)
 
     spectral_occ = zero(S.spectral_occ)
 
@@ -146,7 +145,7 @@ function compute_occupation_MaxwellBoltzmann(S :: ElectronPhononSolver)
     # Same as compute_occupation!, but do not update S.spectral_occ
 
     dω = S.ωs_dense[2] - S.ωs_dense[1]
-    fermi = @. exp(-S.ωs_dense / S.T)
+    fermi = @. exp(-S.ωs_dense / S.model.T)
 
     spectral_occ = zero(S.spectral_occ)
 
@@ -227,14 +226,14 @@ function update_chemical_potential!(S)
         μ_new = find_zero(μ -> compute_occupation(S, μ) - S.occupation, extrema(S.ωs_dense))
     end
 
-    S.model = FrohlichModel(S.model.α, S.model.ω₀, S.model.m, μ_new)
+    S.model = FrohlichModel(S.model.α, S.model.ω₀, S.model.m, μ_new, S.model.T)
 
     return S
 end
 
 
 function compute_self_energy!(S :: ElectronPhononSolver)
-    (; ω₀, μ) = S.model
+    (; ω₀, μ, T) = S.model
     dim = get_dimension(S.qpts)
     Σ_itp = get_Σ_itp_dense(S, S.η)
 
@@ -247,7 +246,7 @@ function compute_self_energy!(S :: ElectronPhononSolver)
                 εkq = get_εk(SVector(k, 0, 0) + q, S.model)
                 kq = norm(SVector(k, 0, 0) + q)
                 ωq = ω₀
-                nq = occ_boson(ωq, S.T)
+                nq = occ_boson(ωq, T)
                 gq = get_eph_g(q, S.model)
 
                 factor = weight * abs2(gq)
@@ -263,8 +262,8 @@ function compute_self_energy!(S :: ElectronPhononSolver)
                         # Finite-temperature case
                         fac1 = imag(1 / (ω + ωq - εkq - Σ_itp(ω + ωq, kq)))
                         fac2 = imag(1 / (ω - ωq - εkq - Σ_itp(ω - ωq, kq)))
-                        Σs_imag_q[iω] += ( fac1 * (nq + occ_fermion(ω + ωq - μ, S.T))
-                                         + fac2 * (nq + 1 - occ_fermion(ω - ωq - μ, S.T)) ) * factor
+                        Σs_imag_q[iω] += ( fac1 * (nq + occ_fermion(ω + ωq - μ, T))
+                                         + fac2 * (nq + 1 - occ_fermion(ω - ωq - μ, T)) ) * factor
                     end
                 end
             end

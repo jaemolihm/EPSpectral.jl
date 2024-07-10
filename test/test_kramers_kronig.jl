@@ -7,7 +7,8 @@ using Test
     ω₀ = 1.0
     η = 0.1
     μ = 0.5
-    model = FrohlichModel(α, ω₀, m, μ)
+    T = 0.0
+    model = FrohlichModel(α, ω₀, m, μ, T)
 
     ωs = range(-100., 100., step=0.04)
     k = 0.2

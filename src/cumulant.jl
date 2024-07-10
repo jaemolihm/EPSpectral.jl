@@ -13,10 +13,10 @@ function get_Cs_t(βs_itp, ts)
     Cs_t
 end
 
-function get_Cs_t_exact(ts, εk, k, model, T, η)
+function get_Cs_t_exact(ts, εk, k, model, η)
     Cs_t = tmap(ts) do t
-        val = quadgk(ω -> -imag(get_Σ_analytic(k, ω + εk + im * η, model, T)) / π * (cis(-ω*t) + im * ω * t - 1) / ω^2, -Inf, 0)[1]
-        val += quadgk(ω -> -imag(get_Σ_analytic(k, ω + εk + im * η, model, T)) / π * (cis(-ω*t) + im * ω * t - 1) / ω^2, 0, Inf)[1]
+        val = quadgk(ω -> -imag(get_Σ_analytic(k, ω + εk + im * η, model)) / π * (cis(-ω*t) + im * ω * t - 1) / ω^2, -Inf, 0)[1]
+        val += quadgk(ω -> -imag(get_Σ_analytic(k, ω + εk + im * η, model)) / π * (cis(-ω*t) + im * ω * t - 1) / ω^2, 0, Inf)[1]
         val
     end
     Cs_t
@@ -133,14 +133,14 @@ function run_cumulant(basis, βs, εk, ts_, ts)
 end
 
 
-function run_cumulant_analytic(model :: FrohlichModel, k, T, η, ts_, ts)
+function run_cumulant_analytic(model :: FrohlichModel, k, η, ts_, ts)
     εk = get_εk(k, model)
 
-    Cs_t_ = get_Cs_t_exact(ts_, εk, k, model, T, η)
+    Cs_t_ = get_Cs_t_exact(ts_, εk, k, model, η)
 
-    Σ0 = get_Σ_analytic(k, εk + im * η, model, T)
+    Σ0 = get_Σ_analytic(k, εk + im * η, model)
     δω = 1e-5
-    dΣ0 = (get_Σ_analytic(k, εk + δω + im * η, model, T) - get_Σ_analytic(k, εk - δω + im * η, model, T)) / 2δω
+    dΣ0 = (get_Σ_analytic(k, εk + δω + im * η, model) - get_Σ_analytic(k, εk - δω + im * η, model)) / 2δω
 
     @. Cs_t_ -= -im * Σ0 * ts_+ dΣ0
     Cs_t_itp = linear_interpolation(ts_, Cs_t_; extrapolation_bc=0)
