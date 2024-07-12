@@ -49,23 +49,34 @@ function get_D_map(basis :: LinearSplineBasis, ω₀, T)
 end
 
 
-function compute_occupation_dilute(S, basis, ω_cutoff)
+function compute_occupation_dilute(S, ωs, ω_cutoff)
     model = S.model
+    T = S.model.T
     Σs_itp = get_Σ_itp_dense(S)
-    T = model.T
 
-    basis_sum = @. (basis.xs[3:end] .- basis.xs[1:end-2]) / 2
-    ωs = grid_points(basis)
+    sum_factor = vcat(
+        (ωs[2] - ωs[1]) / 2,
+        (ωs[3:end] .- ωs[1:end-2]) ./ 2,
+        (ωs[end] - ωs[end-1]) / 2
+    )
 
     # Occupation function f(ω) = df_FD(ω, μ) / dμ * exp(-μ/T) in the μ -> -Inf limit
     fermi = @. exp(-ωs / T) / T
     fermi[ωs .< ω_cutoff] .= 0
 
+    sum_factor .*= fermi
+
     function _compute_occupation_k(k)
         εk = get_εk(k, model)
-        As = .-imag.(1 ./ (ωs .- εk .- Σs_itp.(ωs, k))) ./ π
-        occ_k = sum(basis_sum .*  fermi .* As)
-        occ_k
+        tmapreduce(+, eachindex(ωs)) do iω
+            ω = ωs[iω]
+            A = -imag(1 / (ω - εk - Σs_itp(ω, k))) / π
+            sum_factor[iω] * A
+        end
     end
-    quadgk(k -> k^2 * _compute_occupation_k(k), 0, Inf)[1] * 4π / (2π)^3
+
+    occ_k = _compute_occupation_k.(S.ks_dense)
+    occ = quadgk(k -> k^2 * _compute_occupation_k(k), 0, Inf)[1] * 4π / (2π)^3
+
+    (; occ, occ_k)
 end
