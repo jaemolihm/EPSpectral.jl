@@ -20,6 +20,7 @@ module EPSpectral
     include("kpoints.jl")
     include("kramers_kronig.jl")
     include("frohlich.jl")
+    include("holstein.jl")
     include("solver.jl")
     include("solver_frohlich.jl")
     include("frohlich_phself.jl")
@@ -53,6 +54,7 @@ module EPSpectral
         polynomial_grid_1d, polynomial_grid_2d, polynomial_grid_3d,
         kramers_kronig,
         FrohlichModel,
+        HolsteinLatticeModel,
         get_εk, get_vk,
         get_Σ_analytic,
         get_Σ_mesh,

@@ -27,9 +27,8 @@ mutable struct ElectronPhononSolver{MT, VT} <: AbstractSolver
     spectral_occ :: Vector{Float64}
 end
 
-const FrohlichSolver = ElectronPhononSolver{FrohlichModel}
 
-function ElectronPhononSolver(model, ωs_, ks_, qpts; occupation, ωs_dense = ωs, ks_dense = ks, η, Σs_rest = nothing)
+function ElectronPhononSolver(model, ωs_, ks_, qpts; occupation, ωs_dense = ωs_, ks_dense = ks_, η, Σs_rest = nothing)
     # Convert ranges to vectors
     ωs = Vector(ωs_)
     ks = Vector(ks_)

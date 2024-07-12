@@ -20,13 +20,13 @@ struct FrohlichModel_2D
     T  :: Float64
 end
 
-Base.Broadcast.broadcastable(param::FrohlichModel) = Ref(param)
-Base.Broadcast.broadcastable(param::FrohlichModel_2D) = Ref(param)
+Base.Broadcast.broadcastable(model::FrohlichModel) = Ref(model)
+Base.Broadcast.broadcastable(model::FrohlichModel_2D) = Ref(model)
 
-get_εk(k, param::FrohlichModel) = norm(k)^2 / 2 / param.m
-get_εk(k, param::FrohlichModel_2D) = norm(k)^2 / 2 / param.m
+get_εk(k, model::FrohlichModel) = norm(k)^2 / 2 / model.m
+get_εk(k, model::FrohlichModel_2D) = norm(k)^2 / 2 / model.m
 
-get_vk(k, param::FrohlichModel) = k / param.m
+get_vk(k, model::FrohlichModel) = k / model.m
 
 function get_eph_g(q, model :: FrohlichModel)
     (; α, ω₀, m) = model
@@ -44,16 +44,16 @@ end
 
 
 """
-    get_Σ_analytic(k, ω, param::FrohlichModel)
+    get_Σ_analytic(k, ω, model::FrohlichModel)
 
 The retarded self-energy of the undoped Frohlich model (equals the greater self-energy),
 computed using the analytic formula.
 For μ < 0, use Eq.(28) of Ref.[1]. (The π in the denominator is a typo and is removed.)
 For μ > 0, use Eq.(39-42) of Ref.[1]. (The π in the denominator is a typo and is removed.)
 """
-function get_Σ_analytic(k, ω, param::FrohlichModel)
-    (; ω₀, α, μ, T) = param
-    εk = get_εk(k, param)
+function get_Σ_analytic(k, ω, model::FrohlichModel)
+    (; ω₀, α, μ, T) = model
+    εk = get_εk(k, model)
 
     nq = occ_boson(ω₀, T)
 
