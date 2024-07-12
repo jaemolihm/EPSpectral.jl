@@ -4,6 +4,8 @@ struct LinearSplineBasis
     LinearSplineBasis(xs) = new(length(xs) - 2, xs)
 end
 
+Base.Broadcast.broadcastable(basis :: LinearSplineBasis) = Ref(basis)
+
 grid_points(basis :: LinearSplineBasis) = basis.xs[2:end-1]
 
 
