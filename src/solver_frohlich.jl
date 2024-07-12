@@ -28,10 +28,18 @@ mutable struct ElectronPhononSolver{MT, VT} <: AbstractSolver
 end
 
 
-function ElectronPhononSolver(model, ωs_, ks_, qpts; occupation, ωs_dense = ωs_, ks_dense = ks_, η, Σs_rest = nothing)
+function ElectronPhononSolver(model, ωs_, ks_, qpts; occupation, ωs_dense = nothing, ks_dense = nothing, η, Σs_rest = nothing)
     # Convert ranges to vectors
     ωs = Vector(ωs_)
     ks = Vector(ks_)
+
+    # Default values for dense grids: same range, but 5 times denser
+    if ωs_dense === nothing
+        ωs_dense = range(extrema(ωs)..., step = minimum(diff(ωs)) / 5)
+    end
+    if ks_dense === nothing
+        ks_dense = range(extrema(ks)..., step = minimum(diff(ks)) / 5)
+    end
 
     Σs = zeros(ComplexF64, length(ωs), length(ks))
     As = zeros(length(ωs), length(ks))
