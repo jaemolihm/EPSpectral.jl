@@ -51,7 +51,7 @@ module EPSpectral
 
     export
         Kpoints,
-        polynomial_grid_1d, polynomial_grid_2d, polynomial_grid_3d,
+        polynomial_grid_1d, polynomial_grid_2d, polynomial_grid_3d, azimuthal_grid_3d,
         kramers_kronig,
         FrohlichModel,
         HolsteinLatticeModel,

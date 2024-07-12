@@ -71,3 +71,35 @@ function polynomial_grid_3d(kmax, n :: Int, order :: Int = 1)
     inds = norm.(vectors) .<= kmax
     Kpoints(vectors[inds], weights[inds])
 end
+
+
+"""
+    azimuthal_grid_3d(kmax, n, order)
+Generate a 3D grid with azimuthal symmetry along the x axis.
+"""
+function azimuthal_grid_3d(kmax, nk, nθ, order = 1)
+    # Radial grid: k² dk
+    ks = @. kmax * ((1:nk) ./ nk)^order
+    weights_k = ks.^2 .* vcat(
+        ks[1] + ks[2] / 2,
+        (ks[3:end] .- ks[1:end-2]) ./ 2,
+        (ks[end] - ks[end-1]) / 2
+    )
+
+    # Angular grid: sinθ dθ = d(cosθ)
+    # Compute weights from the trapezoidal rule
+    cosθs = range(-1, 1, length=nθ)
+    weights_θ = fill(2 / (nθ - 1), nθ)
+    weights_θ[1] /= 2
+    weights_θ[end] /= 2
+
+    vectors = map(Iterators.product(ks, cosθs)) do (k, cosθ)
+        sinθ = sqrt(1 - cosθ^2)
+        SVector(k * cosθ, k * sinθ, 0)
+    end |> vec
+
+    # Multiply 2π for the azimuthal weight
+    weights = vec(prod.(collect(Iterators.product(weights_k, weights_θ)))) .* 2π
+
+    Kpoints(vectors, weights)
+end
