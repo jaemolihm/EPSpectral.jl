@@ -13,6 +13,7 @@ module EPSpectral
         using QuadGK
         using Roots
         using NLsolve
+        using FastGaussQuadrature
         using Base.Threads
     end
 
@@ -20,13 +21,15 @@ module EPSpectral
     include("kpoints.jl")
     include("kramers_kronig.jl")
     include("frohlich.jl")
-    include("holstein.jl")
     include("solver.jl")
     include("solver_frohlich.jl")
+    include("holstein.jl")
+    include("peierls.jl")
     include("frohlich_phself.jl")
     include("linear_spline_basis.jl")
     include("current_vertex.jl")
     include("cumulant.jl")
+    include("frohlich_dilute.jl")
 
     @compile_workload begin
         α = 1.0
@@ -50,11 +53,9 @@ module EPSpectral
 
 
     export
-        Kpoints,
         polynomial_grid_1d, polynomial_grid_2d, polynomial_grid_3d, azimuthal_grid_3d,
         kramers_kronig,
-        FrohlichModel,
-        HolsteinLatticeModel,
+        FrohlichModel, HolsteinLatticeModel, PeierlsLatticeModel,
         get_εk, get_vk,
         get_Σ_analytic,
         get_Σ_mesh,

@@ -6,7 +6,9 @@ end
 
 Base.Broadcast.broadcastable(basis :: LinearSplineBasis) = Ref(basis)
 
-grid_points(basis :: LinearSplineBasis) = basis.xs[2:end-1]
+function grid_points(basis :: LinearSplineBasis)
+    @view basis.xs[2:end-1]
+end
 
 
 # Basis evaluation
@@ -31,10 +33,8 @@ end
 
 # Kramers-Kronig transformation
 
-function xlogabsx(x::Number)
-    result = x * log(abs(x))
-    return iszero(x) ? zero(result) : result
-end
+xlogx(x::Real) = iszero(x) ? zero(x) : x * log(abs(x))
+xlogx(x::Complex) = x * log(x)
 
 """
     linear_spline_kramers_kronig(x, x1, x2, x3)
@@ -45,9 +45,9 @@ piecewise-linear function with ``b(x1) = b(x3) = 0`` and ``b(x2) = 1``.
 """
 function linear_spline_kramers_kronig(x, x1, x2, x3)
     (
-        - xlogabsx(x - x1) / (x2 - x1)
-        + xlogabsx(x - x2) * (x3 - x1) / (x2 - x1) / (x3 - x2)
-        - xlogabsx(x - x3) / (x3 - x2)
+        + xlogx(x1 - x) / (x2 - x1)
+        - xlogx(x2 - x) * (x3 - x1) / (x2 - x1) / (x3 - x2)
+        + xlogx(x3 - x) / (x3 - x2)
     )
 end
 
@@ -65,4 +65,22 @@ function apply_Kramers_Kronig(basis :: LinearSplineBasis, ys, x)
     mapreduce(+, 1:N) do i
         linear_spline_kramers_kronig(x, xs[i], xs[i+1], xs[i+2]) * ys[i]
     end
+end
+
+function get_Kramers_Kronig_map(xs_in :: Vector)
+    N = length(xs_in)
+    # Pad xs with equidistant spacing
+    x0 = xs_in[1] - (xs_in[2] - xs_in[1])
+    xN1 = xs_in[end] + (xs_in[end] - xs_in[end-1])
+    xs = vcat(x0, xs_in, xN1)
+
+    # KK_map = zeros(N, N)
+    # for j in 1:N, i in 1:N
+    #     KK_map[i, j] += linear_spline_kramers_kronig(xs[i+1], xs[j], xs[j+1], xs[j+2])
+    # end
+    ijs = collect(Iterators.product(1:N, 1:N))
+    KK_map = tmap(ijs) do (i, j)
+        linear_spline_kramers_kronig(xs[i+1], xs[j], xs[j+1], xs[j+2])
+    end :: Matrix{Float64}
+    KK_map
 end

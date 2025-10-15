@@ -77,21 +77,30 @@ end
     azimuthal_grid_3d(kmax, n, order)
 Generate a 3D grid with azimuthal symmetry along the x axis.
 """
-function azimuthal_grid_3d(kmax, nk, nθ, order = 1)
+function azimuthal_grid_3d(kmax, nk, nθ, order = 1; kmin = 0.0)
     # Radial grid: k² dk
-    ks = @. kmax * ((1:nk) ./ nk)^order
-    weights_k = ks.^2 .* vcat(
-        ks[1] + ks[2] / 2,
-        (ks[3:end] .- ks[1:end-2]) ./ 2,
-        (ks[end] - ks[end-1]) / 2
-    )
+    if kmin != 0
+        order != 1 && throw(ArgumentError("order must be 1 for kmin != 0"))
+        ks = range(kmin, kmax, length = nk)
+    else
+        ks = @. kmax * ((1:nk) ./ nk)^order
+    end
+
+    weights_k = zeros(nk)
+    for ik in 1:nk
+        if ik < nk
+            a, b = ks[ik], ks[ik+1]
+            weights_k[ik] += (b - a) * (3*a^2 + 2*a*b + b^2) / 12
+        end
+        if ik > 1
+            a, b = ks[ik-1], ks[ik]
+            weights_k[ik] += (b - a) * (a^2 + 2*a*b + 3*b^2) / 12
+        end
+    end
 
     # Angular grid: sinθ dθ = d(cosθ)
-    # Compute weights from the trapezoidal rule
-    cosθs = range(-1, 1, length=nθ)
-    weights_θ = fill(2 / (nθ - 1), nθ)
-    weights_θ[1] /= 2
-    weights_θ[end] /= 2
+    # Compute weights from the Gauss-Legendre quadrature
+    cosθs, weights_θ = gausslegendre(nθ)
 
     vectors = map(Iterators.product(ks, cosθs)) do (k, cosθ)
         sinθ = sqrt(1 - cosθ^2)
@@ -100,6 +109,34 @@ function azimuthal_grid_3d(kmax, nk, nθ, order = 1)
 
     # Multiply 2π for the azimuthal weight
     weights = vec(prod.(collect(Iterators.product(weights_k, weights_θ)))) .* 2π
+
+    Kpoints(vectors, weights)
+end
+
+"""
+    spherical_grid_3d(kmax, n, order)
+Generate a 3D grid assuming a spherically symmetric integrand.
+"""
+function spherical_grid_3d(kmax, nk, order = 1)
+    # Radial grid: k² dk
+    ks = @. kmax * ((1:nk) ./ nk)^order
+
+    weights_k = zeros(nk)
+    for ik in 1:nk
+        if ik < nk
+            a, b = ks[ik], ks[ik+1]
+            weights_k[ik] += (b - a) * (3*a^2 + 2*a*b + b^2) / 12
+        end
+        if ik > 1
+            a, b = ks[ik-1], ks[ik]
+            weights_k[ik] += (b - a) * (a^2 + 2*a*b + 3*b^2) / 12
+        end
+    end
+
+    vectors = SVector.(ks, 0, 0)
+
+    # Multiply 4π for the spherical weight
+    weights = weights_k .* 4π
 
     Kpoints(vectors, weights)
 end

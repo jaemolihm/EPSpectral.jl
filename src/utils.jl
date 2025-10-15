@@ -20,11 +20,17 @@ end
 end
 
 
-@inline function occ_boson(e, T)
-    if T > sqrt(eps(eltype(T)))
-        return e == 0 ? zero(e) : 1 / expm1(e / T)
+@inline function occ_boson(e, T :: FT) where {FT}
+    if T > sqrt(eps(FT))
+        return e == 0 ? FT(-1/2) : 1 / expm1(e / T)
     elseif T >= 0
-        return zero(e)
+        if e > 0
+            return FT(0)
+        elseif e == 0
+            return FT(-1/2)
+        else
+            return FT(-1)
+        end
     else
         throw(ArgumentError("Temperature must be positive"))
     end

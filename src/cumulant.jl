@@ -73,9 +73,9 @@ function _cumulant_integral(t, a, b, c)
     if t == 0.
         return 0.0im
     end
-    a == 0 && (a += 1e-5)
-    b == 0 && (b += 1e-5)
-    c == 0 && (c += 1e-5)
+    a == 0 && (a += 1e-6)
+    b == 0 && (b += 1e-6)
+    c == 0 && (c += 1e-6)
 
     int0_a = _cumulant_int0(a, t)
     int0_b = _cumulant_int0(b, t)
@@ -98,11 +98,24 @@ function apply_cumulant_integral(basis :: LinearSplineBasis, βs, t)
     end
 end
 
+function compute_cumulant_matrix(ts, basis)
+    t_and_ib = collect(Iterators.product(ts, 1:basis.N))
+    tmap(t_and_ib) do (t, ib)
+        a, b, c = basis.xs[ib], basis.xs[ib+1], basis.xs[ib+2]
+        EPSpectral._cumulant_integral(t, a, b, c)
+    end
+end
 
-function run_cumulant(basis, βs, εk, ts_, ts)
+function run_cumulant(basis, βs, εk, ts_small, ts, cumulant_matrix = nothing)
     # Step 1-1: Perform integration to get C(t) from Σ(ω)
-    Cs_t_ = tmap(ts_) do t
-        apply_cumulant_integral(basis, βs, t)
+    if cumulant_matrix !== nothing
+        # Reuse cumulant integral coefficients
+        @assert size(cumulant_matrix) == (length(ts_small), basis.N)
+        Cs_t_small = cumulant_matrix * βs
+    else
+        Cs_t_small = tmap(ts_small) do t
+            apply_cumulant_integral(basis, βs, t)
+        end
     end
 
     # Step 1-2: Compute the constant and linear terms of C(t), subtract from C
@@ -115,15 +128,15 @@ function run_cumulant(basis, βs, εk, ts_, ts)
     dΣ0_imag = -π * (basis(δω, βs) - basis(-δω, βs)) / 2δω
     dΣ0 = dΣ0_real + im * dΣ0_imag
 
-    @. Cs_t_ -= -im * Σ0 * ts_ + dΣ0
+    @. Cs_t_small -= -im * Σ0 * ts_small + dΣ0
 
     # Step 1-3: Interpolation C(t) and append linear extrapolation
-    Cs_t_itp = linear_interpolation(ts_, Cs_t_; extrapolation_bc=0)
+    Cs_t_itp = linear_interpolation(ts_small, Cs_t_small; extrapolation_bc=0)
     Cs_t = @. Cs_t_itp(ts) - im * Σ0 * ts + dΣ0
 
 
     # Step 2: Perform Fourier transformation to get A_cum(t) from C(t)
-    Gs_cum_t = -im .* cis.(-εk .* ts) .* exp.(Cs_t)
+    Gs_cum_t = @. -im * cis(-εk * ts) * exp(Cs_t)
     Gs_cum_t[1] /= 2  # Divide t=0 term by 2
     Gs_cum, ωs = fft_t2w(ts, Gs_cum_t)
 

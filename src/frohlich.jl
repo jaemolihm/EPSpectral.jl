@@ -123,21 +123,38 @@ Retarded self-energy of the undoped Frohlich model (equals the greater self-ener
 computed by numerical summation on the mesh `qpts`.
 Implements Eq.(13) of Ref.[1] with `g(q)` from Eq.(2).
 """
-function get_Σ_mesh(k :: T, ω, qpts :: Kpoints{T}, model :: FrohlichModel; linewidth_on_electron = true) where {T}
-    (; α, ω₀, m, μ) = model
+function get_Σ_mesh(k :: KT, ω, qpts :: Kpoints{KT}, model :: FrohlichModel; linewidth_on_electron = true, kq_window = (-Inf, Inf)) where {KT}
+    (; ω₀, T, μ) = model
 
     Σ = tmapreduce(+, 1:length(qpts)) do iq
         q, weight = qpts[iq]
+        ωq = ω₀
 
         Σq = zero(complex(ω))
 
-        if norm(q) > sqrt(eps(Float64))
+        if norm(q) > sqrt(eps(Float64)) && kq_window[1] <= norm(k .+ q) <= kq_window[2]
+
             εkq = get_εk(k .+ q, model)
-            factor = 1 / norm(q)^2 * weight
+            nq = occ_boson(ωq, T)
+            gq = get_eph_g(q, model)
+            factor = weight * abs2(gq)
 
             if linewidth_on_electron
                 # imag(ω) is linewidth of electrons
-                Σq = retarded_self_energy_single_pole(real(ω), εkq - im * imag(ω), ω₀, μ)
+                # Σq = retarded_self_energy_single_pole(real(ω), εkq - im * imag(ω), ω₀, μ)
+                if nq < sqrt(eps(ω₀))
+                    if real(ω) > μ + ωq
+                        Σq = 1 / (ω - ωq - εkq)
+                    elseif real(ω) < μ - ωq
+                        Σq = 1 / (ω + ωq - εkq)
+                    end
+                else
+                    # Finite-temperature case
+                    fac1 = 1 / (ω + ωq - εkq)
+                    fac2 = 1 / (ω - ωq - εkq)
+                    Σq = ( fac1 * (nq + occ_fermion(ω + ωq - μ, T))
+                         + fac2 * (nq + 1 - occ_fermion(ω - ωq - μ, T)) )
+                end
 
             else
                 # imag(ω) is linewidth of phonons
@@ -148,12 +165,11 @@ function get_Σ_mesh(k :: T, ω, qpts :: Kpoints{T}, model :: FrohlichModel; lin
                 end
             end
 
-            Σq *= factor
+            Σq *= factor / (2π)^3
         end
-
         Σq
     end
-    Σ *= α * sqrt(ω₀^3 / 2m) / (2 * π^2)
+
     Σ
 end
 
