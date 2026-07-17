@@ -26,7 +26,7 @@ using Test
 
     kpts = polynomial_grid_3d(kmax, 6, 3)
     @test get_dimension(kpts) == 3
-    @test kpts isa Kpoints{SVector{3, Float64}}
+    @test kpts isa EPSpectral.Kpoints{SVector{3, Float64}}
     @test all(norm.(kpts.vectors) .<= kmax)
 end
 

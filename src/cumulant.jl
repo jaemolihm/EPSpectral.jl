@@ -1,6 +1,5 @@
 using QuadGK
 using FFTW
-using FourierTools
 using SpecialFunctions
 
 function get_Cs_t(βs_itp, ts)
