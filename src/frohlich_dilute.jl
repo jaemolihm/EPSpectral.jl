@@ -60,9 +60,9 @@ function solve_self_energy_dilute(S, ω_cutoff)
     # TODO: Interpolation to dense grid
     
     function _fixed_point!(R, x)
-        dΣs = reshape(x, length(S.ωs), length(S.ks))
-        dΣs_new = compute_self_energy_dilute(S, dΣs, ω_cutoff)
-        R .= vec(dΣs_new .- dΣs)
+        dΣs_ = reshape(x, length(S.ωs), length(S.ks))
+        dΣs_new = compute_self_energy_dilute(S, dΣs_, ω_cutoff)
+        R .= vec(dΣs_new .- dΣs_)
         nothing
     end
     
