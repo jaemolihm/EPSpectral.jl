@@ -7,10 +7,9 @@ using Roots: find_zero
 # EP names are imported one by one: EP exports `occ_fermion` / `occ_boson`, which must not shadow
 # the device-compilable local copies in `utils.jl`.
 using ElectronPhonon: ElectronPhonon, Model, BandStates, ElectronOccupationParams, CPUBackend,
-    alloc, to_device, to_device_copy, unit_to_aru, kpoints_grid, filter_electron_states,
-    unfold_band_states, find_unfolding_indices, run_eph_over_k_and_kq,
-    compute_phonon_states_batched, state_weights, state_xks, chemical_potential_is_computed,
-    compute_ncarrier, compute_ncarrier_hole
+    alloc, to_device, to_device_copy, unit_to_aru, filter_electron_states,
+    unfold_band_states, find_unfolding_indices, run_eph_over_k_and_kq, gather_pair_table!,
+    state_weights, chemical_potential_is_computed, compute_ncarrier, compute_ncarrier_hole
 
 include("utils.jl")
 include("kramers_kronig.jl")

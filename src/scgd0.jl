@@ -94,8 +94,9 @@ function run_scgd0(model::Model{FT}, nk, window; occ::ElectronOccupationParams, 
 end
 
 # Everything the iteration needs that does not change between iterations, on `backend` where the
-# iteration reads it on the device: the states, the coupling g2[ν, i, f] (host), the full-grid
-# phonon frequencies, the grids and maps, the multiplets and the starting μ.
+# iteration reads it on the device: the states, the coupling g2[ν, i, f] (host), the run's phonon
+# table and q index with the states' k indices, the grids and maps, the multiplets and the
+# starting μ.
 function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend, symmetry,
         verbosity, electron_degen_cutoff, ep_kwargs...) where {FT}
     # Outer states on the irreducible BZ, inner states on the full BZ, coupling extracted once.
@@ -104,19 +105,11 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
     sel_i = filter_electron_states(nk, model, window; symmetry, backend)
     sel_i.n > 0 ||
         throw(ArgumentError("the window $window holds no electron state on the grid $nk"))
-    calc = ElectronPhonon.G2Calculator{FT}(; model.nmodes, store_ωq = false)
+    calc = ElectronPhonon.G2Calculator{FT}(; model.nmodes)
     run_eph_over_k_and_kq(model, sel_i, unfold_band_states(sel_i, symmetry); ep_kwargs...,
         calculators = [calc], symmetry = nothing, backend, verbosity)
     (; el_i, el_f, g2) = calc
     f_to_i = find_unfolding_indices(el_i, el_f, symmetry)
-
-    # Phonon frequencies on the full q grid, read by the kernel at the integer hash of k_f - k_i.
-    qpts = kpoints_grid(nk)
-    all(iq -> ElectronPhonon._hash_xk(qpts.vectors[iq], nk, zero(qpts.vectors[iq])) == iq - 1,
-        1:qpts.n) || error("kpoints_grid order is not the integer-hash order the ωq gather assumes")
-    ωph = compute_phonon_states_batched(model, qpts, [:e]; backend).e
-    grid_coords(el) = to_device(backend,
-        [ElectronPhonon._grid_coords_reduced(xk, nk, el_i.kpts.shift) for xk in state_xks(el)])
 
     # Degenerate multiplets of the outer states, with at least two members: at one k, the levels
     # chained by gaps below `electron_degen_cutoff`.
@@ -146,7 +139,8 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
     end
 
     # On a host backend `to_device` aliases the states' own arrays; the loop only reads them.
-    (; el_i, g2, ωph, cs_i = grid_coords(el_i), cs_f = grid_coords(el_f), ngrid = nk,
+    (; el_i, g2, ωph = to_device(backend, calc.ωph), iq_kk = to_device(backend, calc.iq_kk),
+       iks_i = to_device(backend, el_i.iks), iks_f = to_device(backend, el_f.iks),
        ε_i = to_device(backend, el_i.es), w_i = to_device(backend, state_weights(el_i)),
        ε_f = to_device(backend, el_f.es), w_f = to_device(backend, state_weights(el_f)),
        f_to_i = to_device(backend, f_to_i), W = sum(state_weights(el_i)),
@@ -161,7 +155,7 @@ end
 # the `history` of `SCGD0Result`.
 function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, Σ_init, fix_μ,
         ω_acoustic, verbosity)
-    (; g2, ωph, cs_i, cs_f, ngrid, ε_i, w_i, ε_f, w_f, f_to_i, W, nstates_base, multiplets, ωs,
+    (; g2, ωph, iq_kk, iks_i, iks_f, ε_i, w_i, ε_f, w_f, f_to_i, W, nstates_base, multiplets, ωs,
        ωs_dense, K, P) = setup
     FT = eltype(g2)
     nm, ni, nf = size(g2)
@@ -211,7 +205,7 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
         fill!(ImΣ, 0)
         for fs in Iterators.partition(1:nf, nf_chunk)
             ωq_t = view(ωq_buf, :, :, 1:length(fs))
-            gather_ωq!(ωq_t, ωph, cs_i, view(cs_f, fs), ngrid)
+            gather_pair_table!(ωq_t, ωph, iq_kk, iks_i, view(iks_f, fs))
             g2_t = view(g2_dev, :, :, fs)
             for iT in iTs
                 fm_imsigma_tile!(view(ImΣ, :, :, iT), g2_t, ωq_t, ωs, view(ε_f, fs),

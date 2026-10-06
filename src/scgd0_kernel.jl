@@ -92,27 +92,3 @@ function _fm_imsigma_reduce!(ImΣ_T, g2_t, ωq_t, ωs, ε_f_t, f_to_i_t, Σin_T,
     ImΣ_T .+= reshape(sum(bc; dims = (2, 4), init = zero(eltype(ImΣ_T))), nω, ni)
     ImΣ_T
 end
-
-# Phonon frequency of mode ν at q = k_f - k_i, read from the full-grid table `ωph[ν, iq]` at
-# `iq = hash + 1`. `c_i`, `c_f` are the grid coordinates of k_i and k_f reduced into `0:ng-1`, so
-# their difference is in `(-ng, ng)` and one fold reduces it; the hash is `_fill_iqs!`'s, and the
-# table is in `kpoints_grid` order, whose point `iq` has hash `iq - 1`.
-@inline function _ωq_at_pair(ωph, ν, c_i, c_f, ng1, ng2, ng3)
-    h1 = c_f[1] - c_i[1]; h1 += ifelse(h1 < 0, ng1, 0)
-    h2 = c_f[2] - c_i[2]; h2 += ifelse(h2 < 0, ng2, 0)
-    h3 = c_f[3] - c_i[3]; h3 += ifelse(h3 < 0, ng3, 0)
-    @inbounds ωph[ν, (h1 * ng2 + h2) * ng3 + h3 + 1]
-end
-
-"""
-    gather_ωq!(ωq_t, ωph, cs_i, cs_f_t, ngrid)
-
-Fill `ωq_t[ν, i, f]` with the frequency of mode `ν` at `q = k_f - k_i` from the full-grid phonon
-table `ωph[ν, iq]` (`kpoints_grid(ngrid)` order). `cs_i`, `cs_f_t` hold the per-state integer grid
-coordinates of the outer states and of a tile of inner states, reduced into `0:ngrid[d]-1`.
-"""
-function gather_ωq!(ωq_t, ωph, cs_i, cs_f_t, ngrid)
-    nm, ni, nf = size(ωq_t)
-    ωq_t .= _ωq_at_pair.(Ref(ωph), reshape(1:nm, nm, 1, 1), reshape(cs_i, 1, ni, 1),
-        reshape(cs_f_t, 1, 1, nf), ngrid[1], ngrid[2], ngrid[3])
-end

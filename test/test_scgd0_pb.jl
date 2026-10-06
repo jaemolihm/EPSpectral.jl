@@ -1,10 +1,11 @@
-# `run_scgd0` on the pb artifact (irreducible BZ, phonon frequencies from the
-# hash gather, unfolding, multiplet average) against the v2 solver's math transcribed as plain
+# `run_scgd0` on the pb artifact (irreducible BZ, phonon frequencies gathered from the
+# calculator's table, unfolding, multiplet average) against the v2 solver's math transcribed as plain
 # loops on the full BZ (`compute_self_energy!`, `get_interpolated_self_energy`,
 # `compute_occupation!`, `update_chemical_potential!` of `ab_initio_solver_new.jl`): no symmetry,
 # f -> i the identity, no multiplet average, Interpolations and Roots as the old code used them.
-# Its inputs (states, g2, ωq, nstates_base) come from its own `G2Calculator(; store_ωq = true)` run
-# with `symmetry = nothing`; nothing is shared with the run under test.
+# Its inputs (states, g2, ωq, nstates_base) come from its own `G2Calculator` run with
+# `symmetry = nothing`, the per-pair ωq read off that run's phonon table by a plain loop; nothing is
+# shared with the run under test.
 using Pkg: Pkg
 
 # The v2 scFM iteration (`run_scFM_v2` with wfpt = false), `niter` iterations from Σ = -iη_init.
@@ -81,13 +82,15 @@ end
         occ, ωs, η_init, η_min, maxiter = 2, tol = 0.0, verbosity = 0)
 
     sel = EP.filter_electron_states(nk, model, window; symmetry = nothing)
-    calc = EP.G2Calculator{Float64}(; model.nmodes, store_ωq = true)
+    calc = EP.G2Calculator{Float64}(; model.nmodes)
     EP.run_eph_over_k_and_kq(model, sel, sel; calculators = [calc], symmetry = nothing,
         verbosity = 0)
-    el = calc.el_i
+    el, el_f = calc.el_i, calc.el_f
+    ωq = [calc.ωph[ν, calc.iq_kk[el.iks[i], el_f.iks[f]]]
+          for ν in 1:model.nmodes, i in 1:el.n, f in 1:el_f.n]
     occ_ref = deepcopy(occ)
     EP.bte_compute_μ!(occ_ref, el; do_print = false)
-    Σ_ref, μ_ref = scgd0_v2_reference(el, calc.g2, calc.ωq, ωs, ωs_dense, occ_ref, η_min, η_init,
+    Σ_ref, μ_ref = scgd0_v2_reference(el, calc.g2, ωq, ωs, ωs_dense, occ_ref, η_min, η_init,
         2, EP.omega_acoustic)
 
     # The window holds a degenerate pair (at X, split by 2e-7 eV), and the average makes its two

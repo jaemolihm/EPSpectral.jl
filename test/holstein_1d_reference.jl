@@ -62,8 +62,8 @@ function holstein_1d_loop_setup(; nk, t, ω0, g2, ωs, μ_start)
     εs = holstein_1d_energies(nk, t)
     ωs_dense = range(extrema(ωs)...; step = minimum(diff(ωs)))
     (; g2 = fill(g2, 1, ni, nk), ωph = fill(ω0, 1, nk),
-       cs_i = [EP.Vec3(j, 0, 0) for j in 0:ni-1], cs_f = [EP.Vec3(j, 0, 0) for j in 0:nk-1],
-       ngrid = (nk, 1, 1), ε_i = εs[1:ni],
+       iq_kk = Int32[mod(jf - ji, nk) + 1 for ji in 0:ni-1, jf in 0:nk-1],
+       iks_i = 1:ni, iks_f = 1:nk, ε_i = εs[1:ni],
        w_i = [(j == 0 || 2j == nk ? 1 : 2) / nk for j in 0:ni-1],
        ε_f = εs, w_f = fill(1 / nk, nk), f_to_i = [min(j, nk - j) + 1 for j in 0:nk-1],
        W = 1.0, nstates_base = 0.0, multiplets = Vector{Int}[], ωs, ωs_dense,

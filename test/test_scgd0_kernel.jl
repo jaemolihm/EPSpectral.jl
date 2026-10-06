@@ -1,24 +1,4 @@
 @testset "scGD0 kernel" begin
-    @testset "gather_ωq!" begin
-        # Integer hash of k_f - k_i into a full-grid table, against a k-vector search of
-        # `kpoints_grid` for q = k_f - k_i folded into [0, 1).
-        ngrid = (4, 3, 5)
-        nm = 2
-        qpts = kpoints_grid(ngrid)
-        ωph = pseudorandom(nm, qpts.n; seed = 6)
-        cs_i = [EP.Vec3(mod(3j, 4), mod(2j, 3), mod(7j, 5)) for j in 1:6]
-        cs_f = [EP.Vec3(mod(j, 4), mod(5j, 3), mod(2j + 1, 5)) for j in 1:9]
-        ωq = zeros(nm, length(cs_i), length(cs_f))
-        EPSpectral.gather_ωq!(ωq, ωph, cs_i, cs_f, ngrid)
-        ωq_ref = similar(ωq)
-        for (i, c_i) in enumerate(cs_i), (f, c_f) in enumerate(cs_f)
-            xq = mod.((c_f .- c_i) ./ ngrid, 1)
-            iq = findfirst(v -> all(isapprox.(mod.(v, 1), xq; atol = 1e-12)), qpts.vectors)
-            ωq_ref[:, i, f] .= ωph[:, iq]
-        end
-        @test ωq == ωq_ref
-    end
-
     @testset "fm_imsigma_tile!" begin
         # The broadcast reduction (threaded over i on the host) against a plain loop over
         # (ω, ν, i, f) on non-constant data: per-pair ωq, one mode below ω_acoustic with an
