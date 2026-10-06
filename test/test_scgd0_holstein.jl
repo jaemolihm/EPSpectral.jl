@@ -1,6 +1,6 @@
 # `run_scgd0` end to end on the 1D Holstein `Model` of ElectronPhonon
-# (filter -> unfold -> G2Calculator -> ωq hash gather -> f_to_i -> kernel -> KK -> μ), against the
-# closed-form one-shot and the local scalar iteration of `holstein_1d_reference.jl`.
+# (filter -> unfold -> G2Calculator -> phonon-table gather -> f_to_i -> kernel -> KK -> μ), against
+# the closed-form one-shot and the local scalar iteration of `holstein_1d_reference.jl`.
 @testset "scGD0 1D Holstein" begin
     t, λ, ω0, nk, T = 1.0, 0.5, 0.2, 64, 0.1
     # holstein_model stores epmat = g √(2ω0 M), so the extracted g2 = |g|² = 2·dimension·λ·ω0·|t|
