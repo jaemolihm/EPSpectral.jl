@@ -30,3 +30,9 @@ begin
     println("converged = $(res.converged) after $(size(res.history.err, 2)) iterations, " *
             "μ = $(res.μ)")
 end;
+
+# RUN RECORD (2026-10-06, ccqlin059, CPU, 16 threads; EP feat/g2-store-omegaq @ 4f4d879):
+# 33 irreducible / 64 full-BZ states. Converged in 11 iterations,
+# max|ΔΣ| = 0.499, 0.341, 0.264, 0.093, 1.5e-2, 4.5e-3, 7.1e-4, 9.0e-5, 9.3e-6, 1.5e-6, 1.8e-7.
+# μ = -9.37e-5 (bare 4e-17); min_i ∫A_i = 0.99978. About 8 ms per iteration; script 1.6 s
+# including compilation.

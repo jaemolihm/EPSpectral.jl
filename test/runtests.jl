@@ -28,4 +28,5 @@ include("holstein_1d_reference.jl")
     include("test_scgd0_mu.jl")
     include("test_scgd0_loop.jl")
     include("test_scgd0_holstein.jl")
+    include("test_scgd0_pb.jl")
 end
