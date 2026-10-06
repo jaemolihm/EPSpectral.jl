@@ -44,8 +44,10 @@ give `Inf * 0 = NaN`.
     n_q = occ_boson(ωq, T)
     Σ_abs = _lerp_flat(Σin, i_f, ω + ωq, ωd0, dωd)
     Σ_emi = _lerp_flat(Σin, i_f, ω - ωq, ωd0, dωd)
-    ImG_abs = imag(inv(ω + ωq - ε_f - Σ_abs))
-    ImG_emi = imag(inv(ω - ωq - ε_f - Σ_emi))
+    z_abs = ω + ωq - ε_f - Σ_abs
+    z_emi = ω - ωq - ε_f - Σ_emi
+    ImG_abs = -imag(z_abs) / abs2(z_abs)   # Im(1/z), without the scaled complex `inv`
+    ImG_emi = -imag(z_emi) / abs2(z_emi)
     w_f * g2 * (ImG_abs * (n_q + occ_fermion(ω + ωq - μ, T))
               + ImG_emi * (n_q + 1 - occ_fermion(ω - ωq - μ, T)))
 end
