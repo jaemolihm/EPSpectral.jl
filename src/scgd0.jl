@@ -58,7 +58,8 @@ Keywords:
   `Σ` of an `SCGD0Result`), for a restart together with `occ.μlist`.
 - `backend = CPUBackend()`, `symmetry = model.symmetry`, `verbosity = 1`.
 - `gpu_tile`: inner states per chunk of the Fan-Migdal sum; `nothing` takes chunks of at most
-  1 GB of phonon frequencies.
+  1 GB of phonon frequencies and keeps g2 on the device if it fits. On a device backend an Int
+  also keeps g2 in host RAM, copying one chunk at a time.
 - `ω_acoustic`: modes below it are skipped. `electron_degen_cutoff`: multiplet tolerance.
 - Other keywords are passed to `run_eph_over_k_and_kq`.
 """
@@ -163,6 +164,31 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     ωd0, dωd = first(ωs_dense), step(ωs_dense)
     bracket = extrema(ωs_dense) .+ (-FT(0.1), FT(0.1))   # μ search interval (Ry)
 
+    # One partition of the inner states for every iteration, for both residencies: chunks of at
+    # most 1 GB of ωq, or `gpu_tile` inner states.
+    nf_chunk = gpu_tile === nothing ? clamp(fld(2^30, sizeof(FT) * nm * ni), 1, nf) :
+                                      min(gpu_tile, nf)
+    # g2 is resident on the device iff it fits next to the iteration's buffers with 4 GB to spare;
+    # otherwise it stays in host RAM and each chunk's slab is copied over. An Int `gpu_tile` forces
+    # streaming on a device; on the host g2 is always resident and a chunk is a view.
+    streamed = if ElectronPhonon.is_host(backend)
+        false
+    elseif gpu_tile !== nothing
+        true
+    else
+        loop_bytes = sizeof(g2) + sizeof(FT) * (2 * nm * ni * nf_chunk + length(ωph)) +
+            nm * nf * (2 * sizeof(FT) + sizeof(Int)) +
+            sizeof(Complex{FT}) * (2 * nω * ni * nT + nωd * ni * (nT + 1)) +
+            sizeof(FT) * (nω * ni * (nT + 1) + nωd * (ni + 1))
+        ElectronPhonon.reclaim_device_memory(backend)
+        ElectronPhonon.should_stream_per_batch(backend, loop_bytes + 4_000_000_000)
+    end
+    if verbosity > 0 && !ElectronPhonon.is_host(backend)
+        @info "scGD0: g2 ($(round(sizeof(g2) / 1e9, digits = 2)) GB) " *
+              (streamed ? "streamed from host RAM in chunks of $nf_chunk inner states" :
+                          "resident on the device")
+    end
+
     if Σ_init === nothing
         # The scFM start Σ = -iη_init: iteration 1 is the one-shot G0D0.
         Σ = fill!(alloc(backend, Complex{FT}, nω, ni, nT), -im * FT(η_init))
@@ -179,9 +205,6 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     ReΣ = alloc(backend, FT, nω, ni)
     A = alloc(backend, FT, nωd, ni)                    # spectral functions A_i(ωd)
     D = alloc(backend, FT, nωd)                        # D_T(ωd) = Σ_i w_i A_i(ωd) dωd
-    # One partition of the inner states for every iteration: chunks of at most 1 GB of ωq.
-    nf_chunk = gpu_tile === nothing ? clamp(fld(2^30, sizeof(FT) * nm * ni), 1, nf) :
-                                      min(gpu_tile, nf)
     # One chunk of ωq and of g2 in the (ν f, i) layout of `fm_imsigma_tile!`, flat so that a
     # shorter last chunk is a contiguous prefix.
     ωq_buf = alloc(backend, FT, nm * nf_chunk * ni)
@@ -190,7 +213,7 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     per_νf(x) = vec(repeat(reshape(x, 1, nf), nm))
     ε_νf, f_to_i_νf, w_νf = per_νf(ε_f), per_νf(f_to_i), per_νf(w_f)
     # Read-only for the whole run, so a host alias of the caller's g2 is safe.
-    g2_dev = to_device(backend, g2)
+    g2_dev = streamed ? alloc(backend, FT, nm, ni, nf_chunk) : to_device(backend, g2)
 
     μ = collect(FT, setup.μ_start)
     active = trues(nT)
@@ -216,8 +239,16 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
             # the q index transposed, so the inner states come first.
             ωq_t = reshape(view(ωq_buf, 1:nνf * ni), nm, length(fs), ni)
             gather_pair_table!(ωq_t, ωph, transpose(iq_kk), view(iks_f, fs), iks_i)
+            g2_slab = if streamed
+                # The chunk's contiguous slab g2[:, :, fs], copied to the device.
+                copyto!(g2_dev, 1, g2, nm * ni * (first(fs) - 1) + 1, nm * ni * length(fs))
+                view(g2_dev, :, :, 1:length(fs))
+            else
+                # Resident: a view.
+                view(g2_dev, :, :, fs)
+            end
             g2_t = reshape(view(g2p_buf, 1:nνf * ni), nm, length(fs), ni)
-            permutedims!(g2_t, view(g2_dev, :, :, fs), (1, 3, 2))
+            permutedims!(g2_t, g2_slab, (1, 3, 2))
             νfs = nm * (first(fs) - 1) + 1:nm * last(fs)
             for iT in iTs
                 fm_imsigma_tile!(view(ImΣ, :, :, iT), reshape(g2_t, nνf, ni),
