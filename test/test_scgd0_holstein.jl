@@ -27,6 +27,8 @@
             Σ_ref = complex.(kramers_kronig(ωs, ImΣ), ImΣ)
             @test maximum(norm(res.Σ[:, i, 1] - Σ_ref) for i in axes(res.Σ, 2)) <=
                 1e-12 * norm(Σ_ref)
+            @test res.μ == [μ_fixed]
+            @test res.converged == [false]
         end
 
         @testset "self-consistent, $filling filling" begin
