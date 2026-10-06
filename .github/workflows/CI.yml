@@ -45,6 +45,7 @@ jobs:
           using TOML
           project = TOML.parsefile("Project.toml")
           delete!(project["extras"], "CUDA")
+          delete!(project["compat"], "CUDA")
           filter!(!=("CUDA"), project["targets"]["test"])
           open(io -> TOML.print(io, project), "Project.toml", "w")
       # ElectronPhonon (unregistered) is resolved from GitHub via [sources] in Project.toml.

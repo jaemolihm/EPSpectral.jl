@@ -20,6 +20,7 @@ pseudorandom_complex(dims...; seed) =
     complex.(pseudorandom(dims...; seed), pseudorandom(dims...; seed = seed + 0.5))
 
 include("holstein_1d_reference.jl")
+include("pb_fixture.jl")
 
 @testset "EPSpectral.jl" begin
     include("test_kramers_kronig.jl")

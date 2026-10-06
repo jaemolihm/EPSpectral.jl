@@ -168,26 +168,6 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     # most 1 GB of ωq, or `gpu_tile` inner states.
     nf_chunk = gpu_tile === nothing ? clamp(fld(2^30, sizeof(FT) * nm * ni), 1, nf) :
                                       min(gpu_tile, nf)
-    # g2 is resident on the device iff it fits next to the iteration's buffers with 4 GB to spare;
-    # otherwise it stays in host RAM and each chunk's slab is copied over. An Int `gpu_tile` forces
-    # streaming on a device; on the host g2 is always resident and a chunk is a view.
-    streamed = if ElectronPhonon.is_host(backend)
-        false
-    elseif gpu_tile !== nothing
-        true
-    else
-        loop_bytes = sizeof(g2) + sizeof(FT) * (2 * nm * ni * nf_chunk + length(ωph)) +
-            nm * nf * (2 * sizeof(FT) + sizeof(Int)) +
-            sizeof(Complex{FT}) * (2 * nω * ni * nT + nωd * ni * (nT + 1)) +
-            sizeof(FT) * (nω * ni * (nT + 1) + nωd * (ni + 1))
-        ElectronPhonon.reclaim_device_memory(backend)
-        ElectronPhonon.should_stream_per_batch(backend, loop_bytes + 4_000_000_000)
-    end
-    if verbosity > 0 && !ElectronPhonon.is_host(backend)
-        @info "scGD0: g2 ($(round(sizeof(g2) / 1e9, digits = 2)) GB) " *
-              (streamed ? "streamed from host RAM in chunks of $nf_chunk inner states" :
-                          "resident on the device")
-    end
 
     if Σ_init === nothing
         # The scFM start Σ = -iη_init: iteration 1 is the one-shot G0D0.
@@ -212,6 +192,22 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     # Per-f arrays repeated over ν, in the same fused νf order.
     per_νf(x) = vec(repeat(reshape(x, 1, nf), nm))
     ε_νf, f_to_i_νf, w_νf = per_νf(ε_f), per_νf(f_to_i), per_νf(w_f)
+    # g2 is resident on the device iff it fits next to the buffers above with 4 GB to spare;
+    # otherwise it stays in host RAM and each chunk's slab is copied over. An Int `gpu_tile` forces
+    # streaming on a device; on the host g2 is always resident and a chunk is a view.
+    streamed = if ElectronPhonon.is_host(backend)
+        false
+    elseif gpu_tile !== nothing
+        true
+    else
+        ElectronPhonon.reclaim_device_memory(backend)
+        ElectronPhonon.should_stream_per_batch(backend, sizeof(g2) + 4_000_000_000)
+    end
+    if verbosity > 0 && !ElectronPhonon.is_host(backend)
+        @info "scGD0: g2 ($(round(sizeof(g2) / 1e9, digits = 2)) GB) " *
+              (streamed ? "streamed from host RAM in chunks of $nf_chunk inner states" :
+                          "resident on the device")
+    end
     # Read-only for the whole run, so a host alias of the caller's g2 is safe.
     g2_dev = streamed ? alloc(backend, FT, nm, ni, nf_chunk) : to_device(backend, g2)
 
