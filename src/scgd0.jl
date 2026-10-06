@@ -156,13 +156,13 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
        μ_start)
 end
 
-# The scGD0 iteration on the setup `s` (see `_setup_scgd0`; the fields read here can also be built
-# by hand), starting from `s.μ_start`. Returns the host `Σ[ω, i, T]`, `μ[T]`, `converged[T]` and the
-# `history` of `SCGD0Result`.
-function _loop_scgd0(s, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, Σ_init, fix_μ,
+# The scGD0 iteration on `setup` (see `_setup_scgd0`; the fields read here can also be built by
+# hand), starting from `setup.μ_start`. Returns the host `Σ[ω, i, T]`, `μ[T]`, `converged[T]` and
+# the `history` of `SCGD0Result`.
+function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, Σ_init, fix_μ,
         ω_acoustic, verbosity)
     (; g2, ωph, cs_i, cs_f, ngrid, ε_i, w_i, ε_f, w_f, f_to_i, W, nstates_base, multiplets, ωs,
-       ωs_dense, K, P) = s
+       ωs_dense, K, P) = setup
     FT = eltype(g2)
     nm, ni, nf = size(g2)
     nω, nωd, nT = length(ωs), length(ωs_dense), length(occ)
@@ -192,7 +192,7 @@ function _loop_scgd0(s, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, �
     # Read-only for the whole run, so a host alias of the caller's g2 is safe.
     g2_dev = to_device(backend, g2)
 
-    μ = collect(FT, s.μ_start)
+    μ = collect(FT, setup.μ_start)
     active = trues(nT)
     hist_err, hist_μ, hist_minA = (fill(FT(NaN), nT, maxiter) for _ in 1:3)
     wall = zeros(maxiter)
@@ -249,8 +249,9 @@ function _loop_scgd0(s, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, �
                     nstates_base, occ.spin_degeneracy) - n_target
                 excess(bracket[1]) * excess(bracket[2]) > 0 && throw(ArgumentError(
                     "no chemical potential in $bracket gives $n_target electrons per cell at " *
-                    "T = $T: the window holds too few states on one side of the gap. Pass " *
-                    "occ.μlist and fix_μ = true."))
+                    "T = $T: the window holds too few states on one side of the gap, or the " *
+                    "spectral weight it loses outside ωs_dense moves the count past the target. " *
+                    "Pass occ.μlist and fix_μ = true, or widen the window or ωs."))
                 μ[iT] = find_zero(excess, bracket)
             end
             # 8-9. Convergence; a converged temperature keeps its Σ and μ and stops iterating.
@@ -320,8 +321,8 @@ Read an [`SCGD0Result`](@ref) written by [`save_scgd0`](@ref).
 """
 function load_scgd0(filename)
     jldopen(filename, "r") do file
-        history = (; (Symbol(name) => file["history/$name"]
-                      for name in ("err", "μ", "min_spectral_weight", "wall", "iter_frozen"))...)
+        group = file["history"]
+        history = (; (Symbol(name) => group[name] for name in keys(group))...)
         SCGD0Result(file["ωs"], file["Σ"], file["μ"], file["el_i"], file["Tlist"], file["nlist"],
             file["converged"], history)
     end

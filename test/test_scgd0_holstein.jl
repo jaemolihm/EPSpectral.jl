@@ -1,4 +1,4 @@
-# Verification items 1-2: `run_scgd0` end to end on the 1D Holstein `Model` of ElectronPhonon
+# `run_scgd0` end to end on the 1D Holstein `Model` of ElectronPhonon
 # (filter -> unfold -> G2Calculator -> ωq hash gather -> f_to_i -> kernel -> KK -> μ), against the
 # closed-form one-shot and the local scalar iteration of `holstein_1d_reference.jl`.
 @testset "scGD0 1D Holstein" begin
@@ -41,6 +41,11 @@
             @test norm(res.Σ[:, 1, 1] - Σ_ref) <= 1e-10 * norm(Σ_ref)
             @test abs(res.μ[1] - μ_ref) < 1e-9
             nlist == 0 || @test abs(res.μ[1] - μ0) > 1e-6
+
+            # Chunking the inner states (7 does not divide 64) only reorders the f sum.
+            res_tiled = run(occ_for(nlist); gpu_tile = 7)
+            @test norm(res_tiled.Σ - res.Σ) <= 1e-12 * norm(res.Σ)
+            @test abs(res_tiled.μ[1] - res.μ[1]) < 1e-12   # μ ~ 1e-4 at half filling: absolute
 
             # Save and load.
             res_loaded = load_scgd0(save_scgd0(joinpath(mktempdir(), "scgd0.jld2"), res))

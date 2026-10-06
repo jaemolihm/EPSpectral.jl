@@ -1,4 +1,4 @@
-# Verification item 3: `run_scgd0` on the pb artifact (irreducible BZ, phonon frequencies from the
+# `run_scgd0` on the pb artifact (irreducible BZ, phonon frequencies from the
 # hash gather, unfolding, multiplet average) against the v2 solver's math transcribed as plain
 # loops on the full BZ (`compute_self_energy!`, `get_interpolated_self_energy`,
 # `compute_occupation!`, `update_chemical_potential!` of `ab_initio_solver_new.jl`): no symmetry,
@@ -90,10 +90,13 @@ end
     Σ_ref, μ_ref = scgd0_v2_reference(el, calc.g2, calc.ωq, ωs, ωs_dense, occ_ref, η_min, η_init,
         2, EP.omega_acoustic)
 
-    # The window holds a degenerate pair (at X), so the multiplet average is exercised.
+    # The window holds a degenerate pair (at X, split by 2e-7 eV), and the average makes its two
+    # self-energies identical.
     el_i = res.el_i
-    @test any(el_i.iks[i] == el_i.iks[j] && abs(el_i.es[i] - el_i.es[j]) < EP.electron_degen_cutoff
-              for i in 1:el_i.n, j in 1:el_i.n if i != j)
+    pairs = [(i, j) for i in 1:el_i.n, j in 1:el_i.n if i < j && el_i.iks[i] == el_i.iks[j] &&
+             abs(el_i.es[i] - el_i.es[j]) < EP.electron_degen_cutoff]
+    @test length(pairs) == 1
+    @test all(res.Σ[:, i, :] == res.Σ[:, j, :] for (i, j) in pairs)
     # The irreducible states cover the full-BZ window states.
     @test sum(state_weights(res.el_i)) ≈ sum(state_weights(el)) rtol = 1e-12
     js = [state_index(el, res.el_i[i]) for i in 1:res.el_i.n]

@@ -18,7 +18,7 @@ extrapolation in Interpolations.jl.
 @inline function _lerp_flat(Σin, col, x, ωd0, dωd)
     nωd = size(Σin, 1)
     t = (x - ωd0) / dωd
-    t <= 0 && return @inbounds Σin[1, col]
+    !(t > 0) && return @inbounds Σin[1, col]   # also a NaN x
     t >= nωd - 1 && return @inbounds Σin[nωd, col]
     j = unsafe_trunc(Int, t)   # floor, since 0 < t < nωd - 1
     r = t - j
