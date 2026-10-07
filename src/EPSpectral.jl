@@ -1,68 +1,22 @@
-__precompile__(true)
 module EPSpectral
 
-    using PrecompileTools
+using LinearAlgebra: mul!
+using JLD2: jldopen
+using OhMyThreads: tforeach, tmap, index_chunks
+using Roots: find_zero
+# EP names are imported one by one: EP exports `occ_fermion` / `occ_boson`, which must not shadow
+# the device-compilable local copies in `utils.jl`.
+using ElectronPhonon: ElectronPhonon, Model, BandStates, ElectronOccupationParams, CPUBackend,
+    alloc, to_device, to_device_copy, unit_to_aru, filter_electron_states,
+    unfold_band_states, find_unfolding_indices, run_eph_over_k_and_kq, gather_pair_table!,
+    state_weights, chemical_potential_is_computed, compute_ncarrier, compute_ncarrier_hole
 
-    @recompile_invalidations begin
-        using LinearAlgebra
-        using StaticArrays
-        using OhMyThreads
-        using ChunkSplitters
-        using PolyLog
-        using Interpolations
-        using QuadGK
-        using Roots
-        using NLsolve
-        using FastGaussQuadrature
-        using Base.Threads
-    end
+include("utils.jl")
+include("kramers_kronig.jl")
+include("scgd0_grids.jl")
+include("scgd0_kernel.jl")
+include("scgd0.jl")
 
-    include("utils.jl")
-    include("kpoints.jl")
-    include("kramers_kronig.jl")
-    include("frohlich.jl")
-    include("solver.jl")
-    include("solver_frohlich.jl")
-    include("holstein.jl")
-    include("peierls.jl")
-    include("frohlich_phself.jl")
-    include("linear_spline_basis.jl")
-    include("current_vertex.jl")
-    include("cumulant.jl")
-    include("frohlich_dilute.jl")
-
-    @compile_workload begin
-        α = 1.0
-        m = 0.5
-        ω₀ = 1.0
-        μ = -Inf
-        T = 0.0
-        model = FrohlichModel(α, ω₀, m, μ, T)
-
-        qmax = 5.0
-        nq = 10
-        order = 4
-        qpts = polynomial_grid_3d(qmax, nq, order)
-
-        ω = 3.0 + 0.5im
-        k = SVector(2.0, 0., 0.)
-
-        get_Σ_analytic(k, ω, model)
-        get_Σ_mesh(k, ω, qpts, model)
-    end
-
-
-    export
-        polynomial_grid_1d, polynomial_grid_2d, polynomial_grid_3d, azimuthal_grid_3d,
-        kramers_kronig,
-        FrohlichModel, HolsteinLatticeModel, PeierlsLatticeModel,
-        get_εk, get_vk,
-        get_Σ_analytic,
-        get_Σ_mesh,
-        ElectronPhononSolver,
-        get_Σ_itp, get_Σ_itp_dense,
-        compute_self_energy_analytic!, compute_spectral_function!, compute_occupation!,
-        plot_spectral_function!, update_chemical_potential!, plot_self_energy!,
-        LinearSplineBasis
+export run_scgd0, SCGD0Result, save_scgd0, load_scgd0, kramers_kronig
 
 end

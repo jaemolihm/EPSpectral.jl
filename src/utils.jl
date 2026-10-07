@@ -1,3 +1,11 @@
+# Fermi-Dirac and Bose-Einstein occupations, called inside the Fan-Migdal element function
+# (`fm_term`) that a broadcast reduction runs on the host and on the device.
+# ElectronPhonon exports functions of the same names, but its `occ_fermion` takes `occ_type` as a
+# runtime keyword, whose branch chain and string-interpolating `throw` do not compile in a device
+# kernel. These local copies are therefore not exported, and EPSpectral imports ElectronPhonon names
+# explicitly so that EP's versions are not in scope here.
+# TODO: upstream a device-compilable form to ElectronPhonon and delete these copies.
+
 @inline function occ_fermion(e, T)
     if T > sqrt(eps(eltype(T)))
         return 1 / (exp(e / T) + 1)
@@ -7,18 +15,6 @@
         throw(ArgumentError("Temperature must be positive"))
     end
 end
-
-@inline function docc_fermion(e, T)
-    if T > sqrt(eps(eltype(T)))
-        z = exp(e / T)
-        return - z / (z + 1)^2 / T
-    elseif T >= 0
-        return e == 0 ? Inf : zero(e)
-    else
-        throw(ArgumentError("Temperature must be positive"))
-    end
-end
-
 
 @inline function occ_boson(e, T :: FT) where {FT}
     if T > sqrt(eps(FT))
@@ -34,12 +30,4 @@ end
     else
         throw(ArgumentError("Temperature must be positive"))
     end
-end
-
-@inline function delta_gaussian(x :: T, η) where T
-    exp(-(x / η)^2) / sqrt(T(π)) / η
-end
-
-@inline function delta_lorentzian(x :: T, η) where T
-    η / T(π) / (x^2 + η^2)
 end
