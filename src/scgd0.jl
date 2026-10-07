@@ -182,7 +182,13 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     # One partition of the inner states for every iteration: chunks of at most 1 GB of ωq.
     nf_chunk = gpu_tile === nothing ? clamp(fld(2^30, sizeof(FT) * nm * ni), 1, nf) :
                                       min(gpu_tile, nf)
-    ωq_buf = alloc(backend, FT, nm, ni, nf_chunk)
+    # One chunk of ωq and of g2 in the (ν f, i) layout of `fm_imsigma_tile!`, flat so that a
+    # shorter last chunk is a contiguous prefix.
+    ωq_buf = alloc(backend, FT, nm * nf_chunk * ni)
+    g2p_buf = alloc(backend, FT, nm * nf_chunk * ni)
+    # Per-f arrays repeated over ν, in the same fused νf order.
+    per_νf(x) = vec(repeat(reshape(x, 1, nf), nm))
+    ε_νf, f_to_i_νf, w_νf = per_νf(ε_f), per_νf(f_to_i), per_νf(w_f)
     # Read-only for the whole run, so a host alias of the caller's g2 is safe.
     g2_dev = to_device(backend, g2)
 
@@ -201,16 +207,23 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
             mul!(Σd, P, view(Σ, :, :, iT))
             view(Σin, :, :, iT) .= complex.(real.(Σd), min.(imag.(Σd), -η_min[iT]))
         end
-        # 2-3. Im Σ: the Fan-Migdal sum, f-chunks outside so a chunk's ωq is gathered once.
+        # 2-3. Im Σ: the Fan-Migdal sum, f-chunks outside so a chunk's ωq is gathered and its
+        # g2 permuted to (ν, f, i) once.
         fill!(ImΣ, 0)
         for fs in Iterators.partition(1:nf, nf_chunk)
-            ωq_t = view(ωq_buf, :, :, 1:length(fs))
-            gather_pair_table!(ωq_t, ωph, iq_kk, iks_i, view(iks_f, fs))
-            g2_t = view(g2_dev, :, :, fs)
+            nνf = nm * length(fs)
+            # ωq[ν, f, i]: the pair gather with the roles of the two state lists swapped and
+            # the q index transposed, so the inner states come first.
+            ωq_t = reshape(view(ωq_buf, 1:nνf * ni), nm, length(fs), ni)
+            gather_pair_table!(ωq_t, ωph, transpose(iq_kk), view(iks_f, fs), iks_i)
+            g2_t = reshape(view(g2p_buf, 1:nνf * ni), nm, length(fs), ni)
+            permutedims!(g2_t, view(g2_dev, :, :, fs), (1, 3, 2))
+            νfs = nm * (first(fs) - 1) + 1:nm * last(fs)
             for iT in iTs
-                fm_imsigma_tile!(view(ImΣ, :, :, iT), g2_t, ωq_t, ωs, view(ε_f, fs),
-                    view(f_to_i, fs), view(Σin, :, :, iT), ωd0, dωd, μ[iT], occ.Tlist[iT],
-                    view(w_f, fs), ω_acoustic)
+                fm_imsigma_tile!(view(ImΣ, :, :, iT), reshape(g2_t, nνf, ni),
+                    reshape(ωq_t, nνf, ni), ωs, view(ε_νf, νfs), view(f_to_i_νf, νfs),
+                    view(Σin, :, :, iT), ωd0, dωd, μ[iT], occ.Tlist[iT], view(w_νf, νfs),
+                    ω_acoustic)
             end
         end
         # 4. Re Σ by Kramers-Kronig.

@@ -53,27 +53,28 @@ give `Inf * 0 = NaN`.
 end
 
 """
-    fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_f_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_f_t,
-                     ω_acoustic)
+    fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_t, ω_acoustic)
 
 Add the Fan-Migdal Im Σ of one tile of inner states `f` to `ImΣ_T[ω, i]`, at one temperature `T`
-and chemical potential `μ`. `g2_t[ν, i, f]` and `ωq_t[ν, i, f]` are the tile's coupling and phonon
-frequencies; `ε_f_t`, `f_to_i_t`, `w_f_t` its per-state energies, IBZ representatives and weights;
-`Σin_T[ωd, i]` the clamped input self-energy on the dense grid (see [`fm_term`](@ref)).
+and chemical potential `μ`. `g2_t[νf, i]` and `ωq_t[νf, i]` are the tile's coupling and phonon
+frequencies with the mode and inner-state indices fused, `νf = ν + nmodes (f - 1)`; `ε_t`,
+`f_to_i_t`, `w_t` are the per-state energies, IBZ representatives and weights of `f`, repeated
+over `ν` in the same `νf` order; `Σin_T[ωd, i]` is the clamped input self-energy on the dense grid
+(see [`fm_term`](@ref)).
 
-The sum over `(ν, f)` is a `sum(…; dims = (2, 4))` over a lazy `(ω, ν, i, f)` broadcast of
-`fm_term`: nothing 4D is materialized, and the reduction order is fixed, so the result is
-deterministic. A host `Broadcasted` reduction runs serially, so on the host the i axis is split into
-chunks reduced in parallel; chunks write disjoint i, so the result does not depend on the thread
-count.
+The sum over `νf` is a `sum(…; dims = 2)` over a lazy `(ω, νf, i)` broadcast of `fm_term`: nothing
+3D is materialized, and the reduction order is fixed, so the result is deterministic. The summed
+index being a single contiguous axis keeps the per-element index arithmetic of the reduction small.
+A host `Broadcasted` reduction runs serially, so on the host the i axis is split into chunks reduced
+in parallel; chunks write disjoint i, so the result does not depend on the thread count.
 """
-function fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_f_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T,
-        w_f_t, ω_acoustic)
-    args = (ωs, ε_f_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_f_t, ω_acoustic)
+function fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_t,
+        ω_acoustic)
+    args = (ωs, ε_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_t, ω_acoustic)
     if ElectronPhonon.on_backend(CPUBackend(), ImΣ_T)
         # Host: thread over chunks of i.
         tforeach(index_chunks(axes(ImΣ_T, 2); n = 2 * Threads.nthreads()); chunking = false) do is
-            @views _fm_imsigma_reduce!(ImΣ_T[:, is], g2_t[:, is, :], ωq_t[:, is, :], args...)
+            @views _fm_imsigma_reduce!(ImΣ_T[:, is], g2_t[:, is], ωq_t[:, is], args...)
         end
     else
         # Device: one reduction over the whole tile.
@@ -82,15 +83,15 @@ function fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_f_t, f_to_i_t, Σin_T, ω
     ImΣ_T
 end
 
-function _fm_imsigma_reduce!(ImΣ_T, g2_t, ωq_t, ωs, ε_f_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T,
-        w_f_t, ω_acoustic)
+function _fm_imsigma_reduce!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_t,
+        ω_acoustic)
     nω, ni = size(ImΣ_T)
-    nm, nf = size(g2_t, 1), size(g2_t, 3)
-    per_f(x) = reshape(x, 1, 1, 1, nf)
+    nνf = size(g2_t, 1)
+    per_νf(x) = reshape(x, 1, nνf, 1)
     bc = Broadcast.instantiate(Broadcast.broadcasted(fm_term,
-        reshape(ωs, nω, 1, 1, 1), reshape(g2_t, 1, nm, ni, nf), reshape(ωq_t, 1, nm, ni, nf),
-        per_f(ε_f_t), per_f(f_to_i_t), Ref(Σin_T), ωd0, dωd, μ, T, per_f(w_f_t), ω_acoustic))
+        reshape(ωs, nω, 1, 1), reshape(g2_t, 1, nνf, ni), reshape(ωq_t, 1, nνf, ni),
+        per_νf(ε_t), per_νf(f_to_i_t), Ref(Σin_T), ωd0, dωd, μ, T, per_νf(w_t), ω_acoustic))
     # `init` is required: a host `Broadcasted` has no `reducedim_init` method without it.
-    ImΣ_T .+= reshape(sum(bc; dims = (2, 4), init = zero(eltype(ImΣ_T))), nω, ni)
+    ImΣ_T .+= reshape(sum(bc; dims = 2, init = zero(eltype(ImΣ_T))), nω, ni)
     ImΣ_T
 end

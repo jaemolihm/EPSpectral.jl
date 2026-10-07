@@ -19,9 +19,12 @@
         μ, T = 0.07, 0.03
         ωd0, dωd = first(ωs_dense), step(ωs_dense)
 
+        # The (ν f, i) layout of `fm_imsigma_tile!`, from the [ν, i, f] arrays of the reference.
+        fused(x) = reshape(permutedims(x, (1, 3, 2)), nm * nf, ni)
+        per_νf(x) = vec(repeat(reshape(x, 1, nf), nm))
         ImΣ = fill(0.5, nω, ni)   # accumulated into
-        EPSpectral.fm_imsigma_tile!(ImΣ, g2, ωq, ωs, ε_f, f_to_i, Σin, ωd0, dωd, μ, T, w_f,
-            ω_acoustic)
+        EPSpectral.fm_imsigma_tile!(ImΣ, fused(g2), fused(ωq), ωs, per_νf(ε_f), per_νf(f_to_i), Σin,
+            ωd0, dωd, μ, T, per_νf(w_f), ω_acoustic)
         ImΣ_ref = fill(0.5, nω, ni)
         fd(x) = 1 / (exp(x / T) + 1)
         for f in 1:nf, i in 1:ni, ν in 1:nm, (iω, ω) in enumerate(ωs)
