@@ -5,7 +5,7 @@ using LinearAlgebra: norm
 using Interpolations: interpolate, extrapolate, scale, Gridded, BSpline, Linear, Flat
 const EP = ElectronPhonon
 
-# Optional GPU dependency (skipped if absent). No testset uses it yet.
+# Optional GPU dependency for the CPU-vs-GPU testsets (skipped if absent).
 const HAVE_CUDA = try
     @eval using CUDA
     CUDA.functional()
@@ -20,6 +20,7 @@ pseudorandom_complex(dims...; seed) =
     complex.(pseudorandom(dims...; seed), pseudorandom(dims...; seed = seed + 0.5))
 
 include("holstein_1d_reference.jl")
+include("pb_fixture.jl")
 
 @testset "EPSpectral.jl" begin
     include("test_kramers_kronig.jl")
@@ -29,4 +30,9 @@ include("holstein_1d_reference.jl")
     include("test_scgd0_loop.jl")
     include("test_scgd0_holstein.jl")
     include("test_scgd0_pb.jl")
+    if HAVE_CUDA
+        include("test_scgd0_gpu.jl")
+    else
+        @info "CUDA not functional: skipping the CPU-vs-GPU testsets"
+    end
 end
