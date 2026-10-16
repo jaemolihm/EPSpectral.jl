@@ -192,14 +192,14 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     # Per-f arrays repeated over ν, in the same fused νf order.
     per_νf(x) = vec(repeat(reshape(x, 1, nf), nm))
     ε_νf, f_to_i_νf, w_νf = per_νf(ε_f), per_νf(f_to_i), per_νf(w_f)
-    # g2 is resident on the device iff it fits next to the buffers above with 4 GB to spare;
-    # otherwise it stays in host RAM and each chunk's slab is copied over. An Int `gpu_tile` forces
-    # streaming on a device; on the host g2 is always resident and a chunk is a view.
+    # g2 is either resident on the device, or streamed: kept in host RAM with each chunk's slab
+    # copied over.
     streamed = if ElectronPhonon.is_host(backend)
-        false
+        false   # no streaming on the host: a chunk is a view of g2
     elseif gpu_tile !== nothing
-        true
+        true    # an Int `gpu_tile` forces streaming
     else
+        # Resident iff g2 fits next to the buffers above with 4 GB to spare.
         ElectronPhonon.reclaim_device_memory(backend)
         ElectronPhonon.should_stream_per_batch(backend, sizeof(g2) + 4_000_000_000)
     end
@@ -229,27 +229,27 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
         # 2-3. Im Σ: the Fan-Migdal sum, f-chunks outside so a chunk's ωq is gathered and its
         # g2 permuted to (ν, f, i) once.
         fill!(ImΣ, 0)
-        for fs in Iterators.partition(1:nf, nf_chunk)
+        @views for fs in Iterators.partition(1:nf, nf_chunk)
             nνf = nm * length(fs)
             # ωq[ν, f, i]: the pair gather with the roles of the two state lists swapped and
             # the q index transposed, so the inner states come first.
-            ωq_t = reshape(view(ωq_buf, 1:nνf * ni), nm, length(fs), ni)
-            gather_pair_table!(ωq_t, ωph, transpose(iq_kk), view(iks_f, fs), iks_i)
+            ωq_t = reshape(ωq_buf[1:nνf * ni], nm, length(fs), ni)
+            gather_pair_table!(ωq_t, ωph, transpose(iq_kk), iks_f[fs], iks_i)
             g2_slab = if streamed
                 # The chunk's contiguous slab g2[:, :, fs], copied to the device.
                 copyto!(g2_dev, 1, g2, nm * ni * (first(fs) - 1) + 1, nm * ni * length(fs))
-                view(g2_dev, :, :, 1:length(fs))
+                g2_dev[:, :, 1:length(fs)]
             else
                 # Resident: a view.
-                view(g2_dev, :, :, fs)
+                g2_dev[:, :, fs]
             end
-            g2_t = reshape(view(g2p_buf, 1:nνf * ni), nm, length(fs), ni)
+            g2_t = reshape(g2p_buf[1:nνf * ni], nm, length(fs), ni)
             permutedims!(g2_t, g2_slab, (1, 3, 2))
             νfs = nm * (first(fs) - 1) + 1:nm * last(fs)
             for iT in iTs
-                fm_imsigma_tile!(view(ImΣ, :, :, iT), reshape(g2_t, nνf, ni),
-                    reshape(ωq_t, nνf, ni), ωs, view(ε_νf, νfs), view(f_to_i_νf, νfs),
-                    view(Σin, :, :, iT), ωd0, dωd, μ[iT], occ.Tlist[iT], view(w_νf, νfs),
+                fm_imsigma_tile!(ImΣ[:, :, iT], reshape(g2_t, nνf, ni),
+                    reshape(ωq_t, nνf, ni), ωs, ε_νf[νfs], f_to_i_νf[νfs],
+                    Σin[:, :, iT], ωd0, dωd, μ[iT], occ.Tlist[iT], w_νf[νfs],
                     ω_acoustic)
             end
         end
