@@ -4,7 +4,6 @@ using Revise
 using CUDA
 using ElectronPhonon
 using EPSpectral
-includet(joinpath(@__DIR__, "compute_scgd0.jl"))
 
 # --- Step P1: model and material ---
 begin
@@ -28,7 +27,7 @@ end;
 
 # --- Step P3: scGD0 ---
 begin
-    res = compute_scgd0(model, (nk, nk, nk), window, ωs, occ; cfg...)
+    res = run_scgd0(model, (nk, nk, nk), window; occ, ωs, cfg...)
     save_scgd0("scgd0_nk$(nk).jld2", res)
     println("μ - E_F (meV) = $((res.μ .- eF) ./ (eV / 1000))")
 end;

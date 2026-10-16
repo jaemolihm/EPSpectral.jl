@@ -9,23 +9,6 @@
 # allocate nor throw.
 
 """
-    _lerp_flat(Σin, col, x, ωd0, dωd)
-
-Linear interpolation of column `col` of `Σin` (sampled on the uniform grid `ωd0 + (j-1) dωd`,
-`j in axes(Σin, 1)`) at `x`, held flat outside the grid: `BSpline(Linear())` with `Flat()`
-extrapolation in Interpolations.jl.
-"""
-@inline function _lerp_flat(Σin, col, x, ωd0, dωd)
-    nωd = size(Σin, 1)
-    t = (x - ωd0) / dωd
-    !(t > 0) && return @inbounds Σin[1, col]   # also a NaN x
-    t >= nωd - 1 && return @inbounds Σin[nωd, col]
-    j = unsafe_trunc(Int, t)   # floor, since 0 < t < nωd - 1
-    r = t - j
-    @inbounds (1 - r) * Σin[j + 1, col] + r * Σin[j + 2, col]
-end
-
-"""
     fm_term(ω, g2, ωq, ε_f, i_f, Σin, ωd0, dωd, μ, T, w_f, ω_acoustic)
 
 One `(ω, ν, i, f)` summand of the Fan-Migdal Im Σ_i(ω), with G self-consistent and D bare:
@@ -42,8 +25,8 @@ give `Inf * 0 = NaN`.
 @inline function fm_term(ω, g2, ωq, ε_f, i_f, Σin, ωd0, dωd, μ, T, w_f, ω_acoustic)
     ωq < ω_acoustic && return zero(g2)
     n_q = occ_boson(ωq, T)
-    Σ_abs = _lerp_flat(Σin, i_f, ω + ωq, ωd0, dωd)
-    Σ_emi = _lerp_flat(Σin, i_f, ω - ωq, ωd0, dωd)
+    Σ_abs = _interp_linear_uniform(Σin, i_f, ω + ωq, ωd0, dωd)
+    Σ_emi = _interp_linear_uniform(Σin, i_f, ω - ωq, ωd0, dωd)
     z_abs = ω + ωq - ε_f - Σ_abs
     z_emi = ω - ωq - ε_f - Σ_emi
     ImG_abs = -imag(z_abs) / abs2(z_abs)   # Im(1/z), without the scaled complex `inv`

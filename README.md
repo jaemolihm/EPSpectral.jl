@@ -23,4 +23,4 @@ array backend (`backend` keyword). `save_scgd0` / `load_scgd0` write and read a 
 with JLD2; a run restarts from one through the `Σ_init` keyword and `occ.μlist`.
 
 Example drivers are in `examples/scgd0/`: the 1D Holstein chain (`run_scgd0_holstein_1d.jl`) and
-SrVO3 (`run_scgd0_srvo3.jl`), both calling `compute_scgd0.jl`.
+SrVO3 (`run_scgd0_srvo3.jl`).

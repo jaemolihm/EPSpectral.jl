@@ -23,7 +23,7 @@ include("holstein_1d_reference.jl")
 
 @testset "EPSpectral.jl" begin
     include("test_kramers_kronig.jl")
-    include("test_scgd0_grids.jl")
+    include("test_frequency_grids.jl")
     include("test_scgd0_kernel.jl")
     include("test_scgd0_mu.jl")
     include("test_scgd0_loop.jl")

@@ -1,4 +1,5 @@
-# The two fixed linear maps of the scGD0 iteration, built once on the host and applied with `mul!`.
+# Linear maps on frequency grids: the Kramers-Kronig and interpolation matrices, built once on the
+# host and applied with `mul!`, and pointwise linear interpolation on a uniform grid.
 
 """
     kk_matrix(ωs) -> K::Matrix
@@ -38,4 +39,22 @@ function interp_matrix(ωs, ωs_dense)
         end
     end
     P
+end
+
+"""
+    _interp_linear_uniform(Σin, col, x, ωd0, dωd)
+
+Linear interpolation of column `col` of `Σin` (sampled on the uniform grid `ωd0 + (j-1) dωd`,
+`j in axes(Σin, 1)`) at `x`, held flat outside the grid: `BSpline(Linear())` with `Flat()`
+extrapolation in Interpolations.jl. Takes isbits values, neither allocates nor throws, so it can
+be called from a device broadcast.
+"""
+@inline function _interp_linear_uniform(Σin, col, x, ωd0, dωd)
+    nωd = size(Σin, 1)
+    t = (x - ωd0) / dωd
+    !(t > 0) && return @inbounds Σin[1, col]   # also a NaN x
+    t >= nωd - 1 && return @inbounds Σin[nωd, col]
+    j = unsafe_trunc(Int, t)   # floor, since 0 < t < nωd - 1
+    r = t - j
+    @inbounds (1 - r) * Σin[j + 1, col] + r * Σin[j + 2, col]
 end

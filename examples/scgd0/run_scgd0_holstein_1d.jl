@@ -3,7 +3,6 @@
 using Revise
 using ElectronPhonon
 using EPSpectral
-includet(joinpath(@__DIR__, "compute_scgd0.jl"))
 
 # --- Step P1: model ---
 begin
@@ -25,7 +24,7 @@ end;
 
 # --- Step P3: scGD0 ---
 begin
-    res = compute_scgd0(model, (nk, 1, 1), window, ωs, occ; cfg...)
+    res = run_scgd0(model, (nk, 1, 1), window; occ, ωs, cfg...)
     save_scgd0("scgd0_holstein_1d_nk$(nk).jld2", res)
     println("converged = $(res.converged) after $(size(res.history.err, 2)) iterations, " *
             "μ = $(res.μ)")

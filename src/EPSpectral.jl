@@ -13,7 +13,7 @@ using ElectronPhonon: ElectronPhonon, Model, BandStates, ElectronOccupationParam
 
 include("utils.jl")
 include("kramers_kronig.jl")
-include("scgd0_grids.jl")
+include("frequency_grids.jl")
 include("scgd0_kernel.jl")
 include("scgd0.jl")
 

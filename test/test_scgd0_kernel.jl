@@ -30,8 +30,8 @@
         for f in 1:nf, i in 1:ni, ν in 1:nm, (iω, ω) in enumerate(ωs)
             ωq[ν, i, f] < ω_acoustic && continue
             n = 1 / expm1(ωq[ν, i, f] / T)
-            Σp = EPSpectral._lerp_flat(Σin, f_to_i[f], ω + ωq[ν, i, f], ωd0, dωd)
-            Σm = EPSpectral._lerp_flat(Σin, f_to_i[f], ω - ωq[ν, i, f], ωd0, dωd)
+            Σp = EPSpectral._interp_linear_uniform(Σin, f_to_i[f], ω + ωq[ν, i, f], ωd0, dωd)
+            Σm = EPSpectral._interp_linear_uniform(Σin, f_to_i[f], ω - ωq[ν, i, f], ωd0, dωd)
             ImΣ_ref[iω, i] += w_f[f] * g2[ν, i, f] *
                 (imag(1 / (ω + ωq[ν, i, f] - ε_f[f] - Σp)) * (n + fd(ω + ωq[ν, i, f] - μ))
                + imag(1 / (ω - ωq[ν, i, f] - ε_f[f] - Σm)) * (n + 1 - fd(ω - ωq[ν, i, f] - μ)))

@@ -1,4 +1,4 @@
-@testset "scGD0 linear maps" begin
+@testset "Frequency grids" begin
     # Nonuniform output grid (the SrVO3 grid, in eV around E_F) and the default dense grid.
     ωs = collect(vcat(-0.35:0.02:-0.11, -0.099:0.001:0.100, 0.12:0.02:0.34))
     ωs_dense = range(extrema(ωs)...; step = minimum(diff(ωs)))
@@ -21,7 +21,7 @@
         @test size(EPSpectral.interp_matrix(ωs, ωs_dense)) == (length(ωs_dense), length(ωs))
     end
 
-    @testset "_lerp_flat" begin
+    @testset "_interp_linear_uniform" begin
         # The dense-grid lookup of the Fan-Migdal kernel, against Interpolations' uniform-grid
         # linear interpolation with flat extrapolation, inside and outside the grid. The two round
         # the grid position (x - ωd0)/dωd differently (Interpolations in the range's
@@ -32,7 +32,7 @@
         xs = vcat(range(ωs[1] - 0.05, ωs[end] + 0.05; length = 997), collect(ωs_dense))
         for col in axes(Σin, 2)
             itp = extrapolate(scale(interpolate(Σin[:, col], BSpline(Linear())), ωs_dense), Flat())
-            err = maximum(abs(EPSpectral._lerp_flat(Σin, col, x, ωd0, dωd) - itp(x)) for x in xs)
+            err = maximum(abs(EPSpectral._interp_linear_uniform(Σin, col, x, ωd0, dωd) - itp(x)) for x in xs)
             @test err <= 5e-14 * maximum(abs, Σin)
         end
     end
