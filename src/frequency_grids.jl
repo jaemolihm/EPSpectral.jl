@@ -113,8 +113,8 @@ function cell_search_table(backend, ωs)
     inv_h = 1 / (FT(1 - 1e-6) * h_min)
     nbuckets = trunc(Int, min((last(ωs) - x0) * inv_h, 2^40)) + 1
     nbuckets <= 2^24 || throw(ArgumentError(
-        "bucket table of $nbuckets entries for a grid with minimum spacing $h_min over a range " *
-        "$(last(ωs) - x0); use a grid without a near-coincident pair of nodes"))
+        "cell search table of $nbuckets entries for a grid with minimum spacing $h_min over a " *
+        "range $(last(ωs) - x0); use a grid without a near-coincident pair of nodes"))
     buckets = [unsafe_trunc(Int, (x - x0) * inv_h) for x in ωs]
     allunique(buckets) || throw(ArgumentError("two grid nodes fall in one bucket"))
     jtab = Int32[searchsortedfirst(buckets, b) - 1 for b in 0:last(buckets)]
@@ -126,9 +126,9 @@ end
 
 Linear interpolation of column `col` of `Σin` (sampled on the sorted grid `ωs`, `size(Σin, 1) ==
 length(ωs)`) at `x`, held flat outside the grid: `Gridded(Linear())` with `Flat()` extrapolation
-in Interpolations.jl. The cell is found from `ωs_cell_table = cell_search_table(backend, ωs)` (on the same
-backend as `ωs`): one table read and one comparison. Takes isbits values and arrays, neither
-allocates nor throws, so it can be called from a device broadcast.
+in Interpolations.jl. The cell is found from `ωs_cell_table = cell_search_table(backend, ωs)`
+(on the same backend as `ωs`): one table read and one comparison. Takes isbits values and arrays,
+neither allocates nor throws, so it can be called from a device broadcast.
 """
 @inline function _self_energy_at(Σin, col, x, ωs, ωs_cell_table)
     (; jtab, x0, inv_h) = ωs_cell_table

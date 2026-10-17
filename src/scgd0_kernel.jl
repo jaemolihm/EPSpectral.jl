@@ -17,13 +17,15 @@ One `(ω, ν, i, f)` summand of the Fan-Migdal Im Σ_i(ω), with G self-consiste
            + Im[1/(ω - ωq - ε_f - Σin_f(ω - ωq))] (n(ωq) + 1 - f(ω - ωq - μ)) }.
 
 `g2 = |g|²/(2ωq)` is the stored coupling, `Σin` the clamped input self-energy on the grid `ωs`,
-read by linear interpolation with the cell found from `ωs_cell_table = cell_search_table(backend, ωs)`, with
-`Σin_f` its column `i_f` (the IBZ representative of `f`). There is no factor π: Im G = -πA.
+read by linear interpolation with the cell found from
+`ωs_cell_table = cell_search_table(backend, ωs)`, with `Σin_f` its column `i_f` (the IBZ
+representative of `f`). There is no factor π: Im G = -πA.
 A mode with `ωq < ω_acoustic` contributes zero, tested before `g2` is read, since the stored
 `g2` is Inf or huge at Γ-acoustic and negative for an imaginary mode, and a multiply-by-mask would
 give `Inf * 0 = NaN`.
 """
-@inline function _fan_migdal_imsigma_term(ω, g2, ωq, ε_f, i_f, Σin, ωs, ωs_cell_table, μ, T, w_f, ω_acoustic)
+@inline function _fan_migdal_imsigma_term(
+        ω, g2, ωq, ε_f, i_f, Σin, ωs, ωs_cell_table, μ, T, w_f, ω_acoustic)
     ωq < ω_acoustic && return zero(g2)
     n_q = occ_boson(ωq, T)
     Σ_abs = _self_energy_at(Σin, i_f, ω + ωq, ωs, ωs_cell_table)
@@ -38,7 +40,7 @@ end
 
 """
     add_fan_migdal_imsigma!(ImΣ_T, g2_t, ωq_t, ωs, ωs_cell_table, ε_t, f_to_i_t, Σin_T, μ, T, w_t,
-                     ω_acoustic)
+                            ω_acoustic)
 
 Add the Fan-Migdal Im Σ of one tile of inner states `f` to `ImΣ_T[ω, i]`, at one temperature `T`
 and chemical potential `μ`. `g2_t[νf, i]` and `ωq_t[νf, i]` are the tile's coupling and phonon
@@ -47,14 +49,15 @@ frequencies with the mode and inner-state indices fused, `νf = ν + nmodes (f -
 over `ν` in the same `νf` order; `Σin_T[ω, i]` is the clamped input self-energy on `ωs`, and
 `ωs_cell_table = cell_search_table(backend, ωs)` (see [`_fan_migdal_imsigma_term`](@ref)).
 
-The sum over `νf` is a `sum(…; dims = 2)` over a lazy `(ω, νf, i)` broadcast of `_fan_migdal_imsigma_term`: nothing
-3D is materialized, and the reduction order is fixed, so the result is deterministic. The summed
-index being a single contiguous axis keeps the per-element index arithmetic of the reduction small.
-A host `Broadcasted` reduction runs serially, so on the host the i axis is split into chunks reduced
-in parallel; chunks write disjoint i, so the result does not depend on the thread count.
+The sum over `νf` is a `sum(…; dims = 2)` over a lazy `(ω, νf, i)` broadcast of
+`_fan_migdal_imsigma_term`: nothing 3D is materialized, and the reduction order is fixed, so the
+result is deterministic. The summed index being a single contiguous axis keeps the per-element
+index arithmetic of the reduction small. A host `Broadcasted` reduction runs serially, so on the
+host the i axis is split into chunks reduced in parallel; chunks write disjoint i, so the result
+does not depend on the thread count.
 """
-function add_fan_migdal_imsigma!(ImΣ_T, g2_t, ωq_t, ωs, ωs_cell_table, ε_t, f_to_i_t, Σin_T, μ, T, w_t,
-        ω_acoustic)
+function add_fan_migdal_imsigma!(
+        ImΣ_T, g2_t, ωq_t, ωs, ωs_cell_table, ε_t, f_to_i_t, Σin_T, μ, T, w_t, ω_acoustic)
     args = (ωs, ωs_cell_table, ε_t, f_to_i_t, Σin_T, μ, T, w_t, ω_acoustic)
     if ElectronPhonon.on_backend(CPUBackend(), ImΣ_T)
         # Host: thread over chunks of i.
@@ -68,8 +71,8 @@ function add_fan_migdal_imsigma!(ImΣ_T, g2_t, ωq_t, ωs, ωs_cell_table, ε_t,
     ImΣ_T
 end
 
-function _fan_migdal_imsigma_reduce!(ImΣ_T, g2_t, ωq_t, ωs, ωs_cell_table, ε_t, f_to_i_t, Σin_T, μ, T, w_t,
-        ω_acoustic)
+function _fan_migdal_imsigma_reduce!(
+        ImΣ_T, g2_t, ωq_t, ωs, ωs_cell_table, ε_t, f_to_i_t, Σin_T, μ, T, w_t, ω_acoustic)
     nω, ni = size(ImΣ_T)
     nνf = size(g2_t, 1)
     per_νf(x) = reshape(x, 1, nνf, 1)
