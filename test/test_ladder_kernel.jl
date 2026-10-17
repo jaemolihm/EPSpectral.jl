@@ -56,18 +56,29 @@ end
 @testset "ladder kernel" begin
     @testset "commensurability check" begin
         ωs = vcat(0.0:0.05:0.5, 0.52:0.02:0.8)
-        @test EPSpectral.check_frequency_grid_commensurate(ωs, 0.01) === nothing
-        @test EPSpectral.check_frequency_grid_commensurate(ωs, 0.005) === nothing
+        @test EPSpectral.ladder_shift_step(ωs, 0.01) == 0.01
+        @test EPSpectral.ladder_shift_step(ωs, 0.005) == 0.005
         # A step that does not divide the grid: the error names the compatible step.
-        err = try; EPSpectral.check_frequency_grid_commensurate(ωs, 0.03); catch e; e; end
+        err = try; EPSpectral.ladder_shift_step(ωs, 0.03); catch e; e; end
         @test err isa ArgumentError
         @test occursin("dω_shift = 0.01", err.msg) && occursin("factor 3", err.msg)
         # A grid with no compatible step.
         ωs_none = [0.0, 1.0, 1.0 + sqrt(2) / 100]
-        err = try; EPSpectral.check_frequency_grid_commensurate(ωs_none, 1.0); catch e; e; end
+        err = try; EPSpectral.ladder_shift_step(ωs_none, 1.0); catch e; e; end
         @test err isa ArgumentError && occursin("No step", err.msg)
         # The message names the node farthest off the lattice and the grid builder.
         @test occursin("ωs[3] = $(ωs_none[3])", err.msg) && occursin("graded_frequency_grid", err.msg)
+    end
+
+    @testset "duplicated and few-ulp nodes" begin
+        # A duplicated node, a 1-ulp pair and a 1e-12 pair would give a zero or tiny derived step.
+        for ωs in ([0.0, 0.5, 0.5, 1.0], [0.0, 0.5, nextfloat(0.5), 1.0], [0.0, 1e-12, 0.5])
+            err = try; EPSpectral.ladder_shift_step(ωs, nothing); catch e; e; end
+            @test err isa ArgumentError && occursin("apart", err.msg)
+            @test_throws ArgumentError EPSpectral.ladder_shift_step(ωs, 0.5)
+            @test_throws ArgumentError EPSpectral._check_frequency_grid(ωs)
+        end
+        @test_throws ArgumentError EPSpectral._check_frequency_grid([0.0])
     end
 
     @testset "derived shift step" begin
@@ -86,6 +97,15 @@ end
         # k > 1 is logged with its cost factor.
         @test_logs (:info, r"factor 2") EPSpectral.ladder_shift_step(ωs, nothing; verbosity = 1)
         @test_logs EPSpectral.ladder_shift_step(ωs_uniform, nothing; verbosity = 1)
+        # A fine step far from zero: the minimum spacing carries accumulated round-off, and the derived
+        # step is refined from the span (0.1 meV nodes around 11.83 eV in Ry, uniform and graded).
+        eV = 1 / 13.605693122994
+        center = 11.83 * eV
+        for grid in (collect(center .+ (-2eV:1e-4eV:2eV)),
+                graded_frequency_grid(center, (1e-4eV, 2e-3eV), (0.1eV, 1eV)))
+            @test EPSpectral.ladder_shift_step(grid, nothing) ≈ 1e-4eV rtol = 1e-6
+            @test EPSpectral.ladder_shift_step(grid, 1e-4eV) == 1e-4eV
+        end
     end
 
     @testset "one regrouped shift against the direct interpolation" begin
