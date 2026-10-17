@@ -1,0 +1,6 @@
+[pb]
+git-tree-sha1 = "957ff4cc753c8bad4750f2a126a324ee0460a2bf"
+
+    [[pb.download]]
+    sha256 = "e4eba0c0bd0f526dfc60a877165784880a134e616c8d6b027bfe06965450e0ee"
+    url = "https://github.com/jaemolihm/ElectronPhonon.jl-testdata/raw/main/pb.tar.gz"
