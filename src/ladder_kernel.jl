@@ -249,21 +249,28 @@ function _threaded_on_host(body, A, axis)
     end
 end
 
-# One element B[m, f, i, type] of the coupling of the shift sums: the sum over the modes ν of the
-# stored coupling `g2[ν, i, fidx[f]]` with the two-table split `tent` of ω_q = ωq[ν, f, i]; type 2
-# has the extra n_B factor `nB[ν, f, i]`. `f` is the position in the chunk, `fidx[f]` the inner
-# state it holds in `g2`, `m` the shift index in units of h, from 0. A mode below `ω_acoustic` is
-# skipped before g2 is read (g2 is Inf or huge at Γ-acoustic).
-@inline function _bin_coupling_on_shift_grid_term(g2, fidx, ωq, nB, w_f, h, ω_acoustic, m, f, i, type)
-    acc = zero(eltype(g2))
+# Adds the modes ν of the column B[:, f, i, type] of the coupling of the shift sums into `B` in place:
+# for each mode in ascending order the stored coupling `g2[ν, i, fidx[f]]` of ω_q = ωq[ν, f, i], split
+# by `tent` onto the two shifts `lo = floor(ω_q / h)` and `lo + 1` (rows `lo + 1` and `lo + 2`) that
+# neighbour ω_q, with the extra n_B factor `nB[ν, f, i]` for type 2. `f` is the position in the chunk
+# and `fidx[f]` the inner state it holds in `g2`. A mode below `ω_acoustic` is skipped before g2 is
+# read (g2 is Inf or huge at Γ-acoustic); every other shift has `tent = 0`. The written columns are
+# distinct for distinct (f, i, type); the return value is only the output a broadcast needs.
+@inline function _add_modes_to_coupling!(B, g2, fidx, ωq, nB, h, ω_acoustic, f, i, type)
     for ν in axes(ωq, 1)
         ω = ωq[ν, f, i]
         ω < ω_acoustic && continue
-        tent = max(zero(h), 1 - abs(ω / h - m))
-        c = g2[ν, i, fidx[f]] * tent
-        acc += type == 1 ? c : c * nB[ν, f, i]
+        x = ω / h
+        lo = floor(Int, x)
+        g = g2[ν, i, fidx[f]]
+        for m in (lo, lo + 1)
+            c = g * max(zero(h), 1 - abs(x - m))
+            # nB is read inside the type-2 branch: with the load hoisted, the device compiler fuses
+            # c * nB into the accumulation, which differs from the unfused sum by an ulp.
+            B[m + 1, f, i, type] += type == 1 ? c : c * nB[ν, f, i]
+        end
     end
-    w_f[f] * acc
+    true
 end
 
 """
@@ -273,14 +280,18 @@ Fill `B[m, f, i, type]` (`m = 1:nshift`, shift `(m - 1) dω_shift`) of one chunk
 `B[m, f, i, 1] = w_f[f] Σ_ν g2[ν, i, fidx[f]] tent(ωq[ν, f, i] / dω_shift - (m - 1))` and the same
 with a factor `nB[ν, f, i]` for `type = 2`, over the modes with `ωq >= ω_acoustic`.
 `tent(x) = max(0, 1 - |x|)` is the linear split of a frequency onto its two neighbouring shifts.
+Each mode is added to those two shifts only, in ascending ν. No index is guarded: `ωq` never exceeds
+the largest phonon frequency, which sets `nshift`, so the last row of `B` receives at most the weight 0.
 """
 function bin_coupling_on_shift_grid!(B, g2, fidx, ωq, nB, w_f, dω_shift, ω_acoustic)
-    m = reshape(0:size(B, 1) - 1, :, 1, 1, 1)
-    i = reshape(axes(B, 3), 1, 1, :, 1)
-    type = reshape(axes(B, 4), 1, 1, 1, :)
+    i = reshape(axes(B, 3), 1, :, 1)
+    type = reshape(axes(B, 4), 1, 1, :)
+    done = similar(B, Bool, size(B, 2), size(B, 3), size(B, 4))
     _threaded_on_host(B, axes(B, 2)) do fs
-        view(B, :, fs, :, :) .= _bin_coupling_on_shift_grid_term.(Ref(g2), Ref(fidx), Ref(ωq), Ref(nB),
-            Ref(w_f), dω_shift, ω_acoustic, m, reshape(fs, 1, :, 1, 1), i, type)
+        fill!(view(B, :, fs, :, :), 0)
+        view(done, fs, :, :) .= _add_modes_to_coupling!.(Ref(B), Ref(g2), Ref(fidx), Ref(ωq), Ref(nB),
+            dω_shift, ω_acoustic, reshape(fs, :, 1, 1), i, type)
+        view(B, :, fs, :, :) .*= reshape(view(w_f, fs), 1, :, 1, 1)
     end
     B
 end
