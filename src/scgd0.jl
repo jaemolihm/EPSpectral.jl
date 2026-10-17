@@ -134,8 +134,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
     end
     length(group) > 1 && push!(multiplets, group)
 
-    (; jtab, x0, inv_h) = bucket_table(collect(FT, ωs))
-    ωs_buckets = (; jtab = to_device(backend, jtab), x0, inv_h)
+    ωs_buckets = bucket_table(backend, collect(FT, ωs))
     ωs_dense = range(extrema(ωs)...; step = dω_dense)
     j_dense, t_dense = interp_table(ωs, ωs_dense)
 

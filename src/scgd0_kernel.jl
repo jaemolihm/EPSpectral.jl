@@ -17,7 +17,7 @@ One `(ω, ν, i, f)` summand of the Fan-Migdal Im Σ_i(ω), with G self-consiste
            + Im[1/(ω - ωq - ε_f - Σin_f(ω - ωq))] (n(ωq) + 1 - f(ω - ωq - μ)) }.
 
 `g2 = |g|²/(2ωq)` is the stored coupling, `Σin` the clamped input self-energy on the grid `ωs`,
-read by linear interpolation with the cell found from `ωs_buckets = bucket_table(ωs)`, with
+read by linear interpolation with the cell found from `ωs_buckets = bucket_table(backend, ωs)`, with
 `Σin_f` its column `i_f` (the IBZ representative of `f`). There is no factor π: Im G = -πA.
 A mode with `ωq < ω_acoustic` contributes zero, tested before `g2` is read, since the stored
 `g2` is Inf or huge at Γ-acoustic and negative for an imaginary mode, and a multiply-by-mask would
@@ -45,7 +45,7 @@ and chemical potential `μ`. `g2_t[νf, i]` and `ωq_t[νf, i]` are the tile's c
 frequencies with the mode and inner-state indices fused, `νf = ν + nmodes (f - 1)`; `ε_t`,
 `f_to_i_t`, `w_t` are the per-state energies, IBZ representatives and weights of `f`, repeated
 over `ν` in the same `νf` order; `Σin_T[ω, i]` is the clamped input self-energy on `ωs`, and
-`ωs_buckets = bucket_table(ωs)` (see [`fm_term`](@ref)).
+`ωs_buckets = bucket_table(backend, ωs)` (see [`fm_term`](@ref)).
 
 The sum over `νf` is a `sum(…; dims = 2)` over a lazy `(ω, νf, i)` broadcast of `fm_term`: nothing
 3D is materialized, and the reduction order is fixed, so the result is deterministic. The summed

@@ -22,7 +22,7 @@
         # reproducibility of each. The setup's arrays go to the device; g2 stays on the host,
         # where the loop expects it.
         on_device(name, value) = name == :ωs_buckets ?
-            (; jtab = EP.to_device(gpu, value.jtab), value.x0, value.inv_h) :
+            EPSpectral.bucket_table(gpu, setup_host.ωs) :
             name in (:g2, :el_i, :multiplets) || !(value isa Array) ?
             value : EP.to_device(gpu, value)
         names = keys(setup_host)

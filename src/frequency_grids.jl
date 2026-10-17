@@ -96,23 +96,29 @@ function interp_apply!(Y, Σ, j, t)
 end
 
 """
-    bucket_table(ωs) -> (; jtab::Vector{Int32}, x0, inv_h)
+    bucket_table(backend, ωs) -> (; jtab::Vector{Int32}, x0, inv_h)
 
-The O(1) cell search table for the sorted grid `ωs`. The axis is cut into buckets of width
-`h < minimum(diff(ωs))` from `x0 = ωs[1]`, `bucket(x) = unsafe_trunc(Int, (x - x0) * inv_h)`, so
-each bucket holds at most one node. `jtab[bucket(x) + 1]` is the number of nodes in earlier
-buckets, all of which lie below `x` because `bucket` is monotone in floating point (the table is
-built with the same expression), so the cell of `x` is that index or the next one. The table has
-`(ωs[end] - ωs[1]) / h + 1` entries, 4 B each, which grows as the inverse of the finest cell.
+The O(1) cell search table for the sorted grid `ωs`, with `jtab` placed on `backend`. The axis is
+cut into buckets of width `h < minimum(diff(ωs))` from `x0 = ωs[1]`, `bucket(x) = unsafe_trunc(Int,
+(x - x0) * inv_h)`, so each bucket holds at most one node. `jtab[bucket(x) + 1]` is the number of
+nodes in earlier buckets, all of which lie below `x` because `bucket` is monotone in floating point
+(the table is built with the same expression), so the cell of `x` is that index or the next one.
+The table has `(ωs[end] - ωs[1]) / h + 1` entries, 4 B each, which grows as the inverse of the
+finest cell; more than `2^24` entries (64 MiB) throws an `ArgumentError`.
 """
-function bucket_table(ωs)
+function bucket_table(backend, ωs)
     FT = eltype(ωs)
     x0 = first(ωs)
-    inv_h = 1 / (FT(1 - 1e-6) * minimum(diff(ωs)))
+    h_min = minimum(diff(ωs))
+    inv_h = 1 / (FT(1 - 1e-6) * h_min)
+    nbuckets = trunc(Int, min((last(ωs) - x0) * inv_h, 2^40)) + 1
+    nbuckets <= 2^24 || throw(ArgumentError(
+        "bucket table of $nbuckets entries for a grid with minimum spacing $h_min over a range " *
+        "$(last(ωs) - x0); use a grid without a near-coincident pair of nodes"))
     buckets = [unsafe_trunc(Int, (x - x0) * inv_h) for x in ωs]
     allunique(buckets) || throw(ArgumentError("two grid nodes fall in one bucket"))
     jtab = Int32[searchsortedfirst(buckets, b) - 1 for b in 0:last(buckets)]
-    (; jtab, x0, inv_h)
+    (; jtab = to_device(backend, jtab), x0, inv_h)
 end
 
 """
@@ -120,7 +126,7 @@ end
 
 Linear interpolation of column `col` of `Σin` (sampled on the sorted grid `ωs`, `size(Σin, 1) ==
 length(ωs)`) at `x`, held flat outside the grid: `Gridded(Linear())` with `Flat()` extrapolation
-in Interpolations.jl. The cell is found from `ωs_buckets = bucket_table(ωs)` (`jtab` on the same
+in Interpolations.jl. The cell is found from `ωs_buckets = bucket_table(backend, ωs)` (on the same
 backend as `ωs`): one table read and one comparison. Takes isbits values and arrays, neither
 allocates nor throws, so it can be called from a device broadcast.
 """
