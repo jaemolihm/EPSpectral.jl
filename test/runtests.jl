@@ -30,6 +30,7 @@ include("pb_fixture.jl")
     include("test_scgd0_loop.jl")
     include("test_scgd0_holstein.jl")
     include("test_scgd0_pb.jl")
+    include("test_ladder_bubble.jl")
     if HAVE_CUDA
         include("test_scgd0_gpu.jl")
     else
