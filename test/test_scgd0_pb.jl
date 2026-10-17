@@ -10,6 +10,8 @@
 # The v2 scFM iteration (`run_scFM_v2` with wfpt = false), `niter` iterations from Σ = -iη_init.
 function scgd0_v2_reference(el, g2, ωq, ωs, ωs_dense, occ, ηlist, η_init, niter, ω_acoustic)
     nω, n, nT, nmodes = length(ωs), el.n, length(occ), size(g2, 1)
+    # Re Σ by the spline Kramers-Kronig map, as in the package.
+    K_re = EPSpectral.kk_matrix(ωs)
     occ_f(e, T) = 1 / (exp(e / T) + 1)
     occ_b(e, T) = 1 / expm1(e / T)
     on_dense(Σs) = [extrapolate(interpolate((ωs,), Σs[:, i, iT], Gridded(Linear())), Flat())(ω)
@@ -38,7 +40,7 @@ function scgd0_v2_reference(el, g2, ωq, ωs, ωs_dense, occ, ηlist, η_init, n
             end
         end
         for iT in 1:nT, i in 1:n
-            Σs_new[:, i, iT] .+= kramers_kronig(ωs, imag.(Σs_new[:, i, iT]))
+            Σs_new[:, i, iT] .+= K_re * imag.(Σs_new[:, i, iT])
         end
         Σs = Σs_new
         # Metal branch of `compute_occupation!`.

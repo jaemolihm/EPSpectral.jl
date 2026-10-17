@@ -36,7 +36,7 @@ function holstein_1d_local_scgd0(ωs, ωs_dense; nk, t, ω0, g2, T, η_init, η_
         ImG_loc(x) = imag(sum(1 / (x - ε - Σin_itp(x)) for ε in εs) / nk)
         ImΣ = [g2 * (ImG_loc(ω + ω0) * (n_B + f(ω + ω0 - μ))
                      + ImG_loc(ω - ω0) * (n_B + 1 - f(ω - ω0 - μ))) for ω in ωs]
-        Σ = complex.(kramers_kronig(ωs, ImΣ), ImΣ)
+        Σ = complex.(EPSpectral.kk_matrix(ωs) * ImΣ, ImΣ)
         fix_μ && continue
         Σd = on_dense(Σ)
         D = [sum(-imag(1 / (ω - ε - Σd[r])) / π for ε in εs) / nk * dω

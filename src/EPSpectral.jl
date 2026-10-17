@@ -12,7 +12,6 @@ using ElectronPhonon: ElectronPhonon, Model, BandStates, ElectronOccupationParam
     state_weights, chemical_potential_is_computed, compute_ncarrier, compute_ncarrier_hole
 
 include("utils.jl")
-include("kramers_kronig.jl")
 include("frequency_grids.jl")
 include("scgd0_kernel.jl")
 include("scgd0.jl")
