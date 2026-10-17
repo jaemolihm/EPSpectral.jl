@@ -6,7 +6,6 @@
 # Its inputs (states, g2, ωq, nstates_base) come from its own `G2Calculator` run with
 # `symmetry = nothing`, the per-pair ωq read off that run's phonon table by a plain loop; nothing is
 # shared with the run under test.
-using Pkg: Pkg
 
 # The v2 scFM iteration (`run_scFM_v2` with wfpt = false), `niter` iterations from Σ = -iη_init.
 function scgd0_v2_reference(el, g2, ωq, ωs, ωs_dense, occ, ηlist, η_init, niter, ω_acoustic)
@@ -64,18 +63,7 @@ function scgd0_v2_reference(el, g2, ωq, ωs, ωs_dense, occ, ηlist, η_init, n
 end
 
 @testset "scGD0 pb against the v2 reference" begin
-    folder = Pkg.Artifacts.ensure_artifact_installed("pb", joinpath(@__DIR__, "Artifacts.toml"))
-    model = EP.load_model_from_epw_new(folder, "temp", "pb"; epmat_outer_momentum = "el")
-    eV, K = unit_to_aru(:eV), unit_to_aru(:K)
-    nk = (6, 6, 6)
-    e_F = 11.83 * eV   # 4 electrons in the 4 Wannier bands on this grid
-    window = (e_F - 1.0eV, e_F + 1.0eV)
-    ωs = e_F .+ vcat(-1.2:0.05:-0.25, -0.24:0.02:0.24, 0.25:0.05:1.2) .* eV
-    ωs_dense = range(extrema(ωs)...; step = minimum(diff(ωs)))
-    η_init = 0.05eV
-    η_min = [0.0, 0.03eV]   # one per temperature
-    occ = ElectronOccupationParams(; Tlist = [300.0, 600.0] .* K, nlist = 0.0, nelec = 4,
-        volume = model.volume, spin_degeneracy = 2, type = :Metal)
+    (; model, nk, window, ωs, ωs_dense, occ, η_init, η_min) = pb_scgd0_fixture()
 
     # Two iterations with the μ update, never converged (tol = 0).
     res = @test_logs (:warn, r"not converged") match_mode = :any run_scgd0(model, nk, window;
