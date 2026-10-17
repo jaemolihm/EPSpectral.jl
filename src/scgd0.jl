@@ -40,9 +40,9 @@ states reduced to the irreducible BZ by `symmetry`), at every temperature of `oc
 
 Each iteration computes Im Σ at the current μ from the Fan-Migdal sum over the window states, with
 the input Σ linearly interpolated onto a uniform dense grid `ωs_dense` and clamped to
-`Im Σ <= -η_min`; Re Σ by [`kramers_kronig`](@ref); averages Σ over degenerate multiplets
-(`electron_degen_cutoff`); and then re-solves μ from the spectral functions of the unclamped Σ for
-the carrier count `occ.nlist + occ.nelec`. A temperature stops iterating once
+`Im Σ <= -η_min`; Re Σ by the spline Kramers-Kronig map [`kramers_kronig`](@ref); averages Σ over
+degenerate multiplets (`electron_degen_cutoff`); and then re-solves μ from the spectral functions
+of the unclamped Σ for the carrier count `occ.nlist + occ.nelec`. A temperature stops iterating once
 `max_{ω,i} |ΔΣ| < tol`; at `maxiter` the last Σ and μ are returned, unconverged ones flagged.
 
 Keywords:

@@ -1,15 +1,45 @@
 # Linear maps on frequency grids: the Kramers-Kronig and interpolation matrices, built once on the
 # host and applied with `mul!`, and pointwise linear interpolation on a uniform grid.
 
-"""
-    kk_matrix(ωs) -> K::Matrix
+xlogx(x) = iszero(x) ? zero(x) : x * log(abs(x))
 
-The matrix of [`kramers_kronig`](@ref) on the grid `ωs`: `K * z == kramers_kronig(ωs, z)` up to
-round-off, for any `z`. `kramers_kronig` is linear in its input, so column `j` is its value on the
-`j`-th unit vector.
+"""
+    linear_spline_kramers_kronig(x, x1, x2, x3)
+
+The principal-value integral `P∫ dy b(y) / (y - x)` of the hat function `b` that is piecewise
+linear with `b(x1) = b(x3) = 0` and `b(x2) = 1`.
+"""
+function linear_spline_kramers_kronig(x, x1, x2, x3)
+    (
+        + xlogx(x1 - x) / (x2 - x1)
+        - xlogx(x2 - x) * (x3 - x1) / (x2 - x1) / (x3 - x2)
+        + xlogx(x3 - x) / (x3 - x2)
+    )
+end
+
+"""
+    kk_matrix(ωs) -> K::Matrix{Float64}
+
+The Kramers-Kronig matrix on the grid `ωs`: for `z` the imaginary part of a retarded function
+sampled on `ωs`, `K * z` is its real part `1/π P∫ dω' z(ω') / (ω' - ω)` at the nodes, with `z`
+replaced by its hat-basis (piecewise-linear) interpolant and the integral done exactly. Valid on
+any grid. Each end value carries a hat that decays linearly to zero over one more cell, of the
+width of the end cell, beyond the grid.
 """
 function kk_matrix(ωs)
-    stack(tmap(j -> kramers_kronig(ωs, (eachindex(ωs) .== j)), eachindex(ωs)))
+    N = length(ωs)
+    # Pad the grid by one end cell on each side.
+    x0 = ωs[1] - (ωs[2] - ωs[1])
+    xN1 = ωs[end] + (ωs[end] - ωs[end-1])
+    xs = vcat(x0, ωs, xN1)
+    K = Matrix{Float64}(undef, N, N)
+    # Column j is the response to the hat centred at ωs[j]; columns are independent.
+    tforeach(index_chunks(1:N; n = 4 * Threads.nthreads()); chunking = false) do js
+        for j in js, i in 1:N
+            K[i, j] = linear_spline_kramers_kronig(xs[i+1], xs[j], xs[j+1], xs[j+2]) / π
+        end
+    end
+    K
 end
 
 """
@@ -58,3 +88,11 @@ be called from a device broadcast.
     r = t - j
     @inbounds (1 - r) * Σin[j + 1, col] + r * Σin[j + 2, col]
 end
+
+"""
+    kramers_kronig(ωs, zs) -> ys
+
+Real part `ys = kk_matrix(ωs) * zs` of the retarded function whose imaginary part is `zs` on the
+grid `ωs`; see [`kk_matrix`](@ref) for the interpolation and end conventions.
+"""
+kramers_kronig(ωs, zs) = kk_matrix(ωs) * zs

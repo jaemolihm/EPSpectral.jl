@@ -2,7 +2,7 @@ module EPSpectral
 
 using LinearAlgebra: mul!
 using JLD2: jldopen
-using OhMyThreads: tforeach, tmap, index_chunks
+using OhMyThreads: tforeach, index_chunks
 using Roots: find_zero
 # EP names are imported one by one: EP exports `occ_fermion` / `occ_boson`, which must not shadow
 # the device-compilable local copies in `utils.jl`.
@@ -12,7 +12,6 @@ using ElectronPhonon: ElectronPhonon, Model, BandStates, ElectronOccupationParam
     state_weights, chemical_potential_is_computed, compute_ncarrier, compute_ncarrier_hole
 
 include("utils.jl")
-include("kramers_kronig.jl")
 include("frequency_grids.jl")
 include("scgd0_kernel.jl")
 include("scgd0.jl")
