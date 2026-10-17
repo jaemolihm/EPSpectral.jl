@@ -28,7 +28,9 @@ from the bare current vertex (`σ_bubble`) and from the vertex dressed by the la
 coupling on the 2x2 Keldysh contour (`σ_ladder`), as an `SCGD0LadderResult`. The ladder equation
 is solved by GMRES (default, `rtol = 1e-2`) or by a fixed-point iteration. The output grid `ωs` of the
 scGD0 run must be commensurate with the shift step `dω_shift` (default `minimum(diff(ωs))`); the cost
-grows as `1 / dω_shift`. `save_scgd0_ladder` / `load_scgd0_ladder` write and read a result with JLD2.
+grows as `1 / dω_shift`. With `backend = gpu_backend()` the ladder runs on the device by the same
+code as on the host (g2 resident or streamed in chunks of `gpu_tile` inner states, as in scGD0).
+`save_scgd0_ladder` / `load_scgd0_ladder` write and read a result with JLD2.
 
 Example drivers are in `examples/scgd0/`: the 1D Holstein chain (`run_scgd0_holstein_1d.jl`,
 `run_scgd0_ladder_holstein_1d.jl`) and SrVO3 (`run_scgd0_srvo3.jl`).

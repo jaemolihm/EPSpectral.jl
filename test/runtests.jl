@@ -37,6 +37,7 @@ include("ladder_fixtures.jl")
     include("test_ladder_pb.jl")
     if HAVE_CUDA
         include("test_scgd0_gpu.jl")
+        include("test_ladder_gpu.jl")
     else
         @info "CUDA not functional: skipping the CPU-vs-GPU testsets"
     end

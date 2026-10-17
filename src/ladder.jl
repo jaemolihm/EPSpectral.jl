@@ -143,8 +143,9 @@ end
 # The work arrays of `apply_ladder!` and the chunking of the inner states: chunks of `gpu_tile`
 # states, or of at most `CHUNK_BYTES` for the larger of the coupling B, the shifted vertex X and
 # the phonon frequencies. g2 is resident on the device or streamed from host RAM, as in
-# `_loop_scgd0`.
-function _ladder_work(ladder, backend, gpu_tile, verbosity)
+# `_loop_scgd0`. `solver_bytes` is the device memory the solver allocates after this call (the
+# GMRES basis), which the residency decision leaves free.
+function _ladder_work(ladder, backend, gpu_tile, verbosity; solver_bytes = 0)
     (; g2, ωs, M) = ladder
     FT = eltype(g2)
     nm, ni, nf = size(g2)
@@ -166,7 +167,8 @@ function _ladder_work(ladder, backend, gpu_tile, verbosity)
     else
         # Resident iff g2 fits next to the buffers above with the headroom to spare.
         ElectronPhonon.reclaim_device_memory(backend)
-        ElectronPhonon.should_stream_per_batch(backend, sizeof(g2) + RESIDENCY_HEADROOM_BYTES)
+        ElectronPhonon.should_stream_per_batch(backend,
+            sizeof(g2) + RESIDENCY_HEADROOM_BYTES + solver_bytes)
     end
     if verbosity > 0 && !ElectronPhonon.is_host(backend)
         @info "ladder: g2 ($(round(sizeof(g2) / 1e9, digits = 2)) GB) " *
@@ -243,7 +245,6 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
     FT = eltype(ladder.g2)
     nω, ni, nT = size(Σ)
     nΩ = length(Ωs)
-    work = _ladder_work(ladder, backend, gpu_tile, verbosity)
     Σ_dev = to_device(backend, Σ)
     Σd_m, Σd_p = (alloc(backend, Complex{FT}, nω, ni) for _ in 1:2)
     Gm, Gp = (alloc(backend, Complex{FT}, nω, 4, ni) for _ in 1:2)
@@ -251,6 +252,10 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
     σ_bubble, σ_ladder = (zeros(FT, 3, 3, nΩ, nT) for _ in 1:2)
     converged, niter = fill(false, nΩ, nT), zeros(Int, nΩ, nT)
     history = fill((; norms = FT[], σ_iter = Matrix{FT}[]), nΩ, nT)
+    # After the vertex and propagator arrays, so that the residency decision sees them; GMRES
+    # grows its basis by one vector per iteration, up to `maxiter + 1`.
+    solver_bytes = solver === :gmres ? (maxiter + 1) * sizeof(J0) : 0
+    work = _ladder_work(ladder, backend, gpu_tile, verbosity; solver_bytes)
     J_all = store_vertex ? zeros(Complex{FT}, nω, 4, 3, 2, ni, nΩ, nT) : nothing
     # Σ at ωs - Ω/2 and ωs + Ω/2, flat outside the grid, unclamped.
     function shifted_Σ!(Σd, Σ_T, xs)
