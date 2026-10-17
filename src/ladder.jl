@@ -135,18 +135,19 @@ function _setup_ladder(setup, scgd0, symmetry; dω_shift, backend)
     end
 
     # The inner states grouped by representative: the star of outer state i is
-    # `inner_states_by_star[star_ptr[i]:star_ptr[i + 1] - 1]` (the column structure of the unfolding map).
+    # `inner_states_by_star[inner_star_ptr[i]:inner_star_ptr[i + 1] - 1]` (the column structure of the
+    # unfolding map).
     inner_states_by_star = sortperm(f_to_i)
     star_sizes = zeros(Int, el_i.n)
     for i in f_to_i
         star_sizes[i] += 1
     end
-    star_ptr = cumsum([1; star_sizes])
+    inner_star_ptr = cumsum([1; star_sizes])
 
     M = ceil(Int, maximum(ωph) / dω_shift) + 1
     klo, wlo, whi = vertex_shift_tables(ωs, FT(dω_shift), M)
-    (; setup..., inner_states_by_star, star_ptr, R = to_device(backend, R), klo = to_device(backend, klo),
-       wlo = to_device(backend, wlo), whi = to_device(backend, whi), M, dω_shift = FT(dω_shift),
+    (; setup..., inner_states_by_star, inner_star_ptr, R = to_device(backend, R),
+       klo = to_device(backend, klo), wlo = to_device(backend, wlo), whi = to_device(backend, whi), M, dω_shift = FT(dω_shift),
        Wω = to_device(backend, trapezoid_weights(ωs)),
        v = to_device(backend, reduce(hcat, el_i.vs)))
 end
@@ -158,7 +159,7 @@ end
 # `_loop_scgd0`. `solver_bytes` is the device memory the solver allocates after this call (the
 # GMRES basis), which the residency decision leaves free.
 function _ladder_workspace(ladder, backend, gpu_tile, verbosity; solver_bytes = 0)
-    (; g2, ωs, M, inner_states_by_star, star_ptr, w_f, iks_f) = ladder
+    (; g2, ωs, M, inner_states_by_star, inner_star_ptr, w_f, iks_f) = ladder
     FT = eltype(g2)
     nm, ni, nf = size(g2)
     nω = length(ωs)
@@ -172,16 +173,17 @@ function _ladder_workspace(ladder, backend, gpu_tile, verbosity; solver_bytes = 
     i1 = 1
     while i1 <= ni
         i2 = i1
-        while i2 < ni && i2 - i1 + 2 <= max_i && star_ptr[i2 + 2] - star_ptr[i1] <= max_f
+        while i2 < ni && i2 - i1 + 2 <= max_i && inner_star_ptr[i2 + 2] - inner_star_ptr[i1] <= max_f
             i2 += 1
         end
         push!(ranges, i1:i2)
         i1 = i2 + 1
     end
     chunks = map(ranges) do ips
-        inner = inner_states_by_star[star_ptr[first(ips)]:star_ptr[last(ips) + 1] - 1]
+        inner = inner_states_by_star[inner_star_ptr[first(ips)]:inner_star_ptr[last(ips) + 1] - 1]
         (; ips, nf = length(inner), fidx = to_device(backend, inner),
-            star_ptr = to_device(backend, star_ptr[first(ips):last(ips) + 1] .- star_ptr[first(ips)] .+ 1),
+            star_ptr = to_device(backend,
+                inner_star_ptr[first(ips):last(ips) + 1] .- inner_star_ptr[first(ips)] .+ 1),
             w_f = w_f[inner], iks_f = iks_f[inner])
     end
     nf_chunk = maximum(c -> c.nf, chunks)
@@ -223,12 +225,13 @@ The ladder kernel on the vertex `J[ω, c12, cart, c0, i]` at temperature `T` and
 `Gm`, `Gp` of one probe frequency: `L(J) = -Gm (s ⊙ K[J]) Gp`, where `K^{ab}[J]_i(ε) = Σ_{f,ν} w_f
 g2 ∫dω d^{ba}(ω) R_f J_{i(f)}^{ab}(ε + ω)` with the bare phonon propagator `d`, evaluated as the
 four shifted sums U±, V± in chunks of outer states with their stars of inner states and their
-combination ([`phonon_exchange_kernel!`](@ref)). `ladder` is the output of `_setup_ladder` and `workspace`
-that of `_ladder_workspace`. Modes below `ω_acoustic` are skipped.
+combination ([`apply_phonon_exchange_kernel!`](@ref)). `ladder` is the output of `_setup_ladder` and
+`workspace` that of `_ladder_workspace`. Modes below `ω_acoustic` are skipped.
 """
 @views function apply_ladder_kernel!(LJ, J, ladder, workspace, Gm, Gp, T; ω_acoustic)
     (; g2, ωph, iq_kk, iks_i, R, klo, wlo, whi, K, ωs, M, dω_shift) = ladder
-    (; chunks, streamed, g2_dev, g2_stage, ωq_buf, nB_buf, B_buf, Bt_buf, X_buf, Cp, Cm, Y, KY, KJ) = workspace
+    (; chunks, streamed, g2_dev, g2_stage, ωq_buf, nB_buf, B_buf, Bt_buf, X_buf, Cp, Cm, Y, KY, KJ) =
+        workspace
     nm, ni, _ = size(g2)
     nω = length(ωs)
     nrow = size(Cp, 1)
@@ -268,7 +271,7 @@ that of `_ladder_workspace`. Modes below `ω_acoustic` are skipped.
             end
         end
     end
-    phonon_exchange_kernel!(KJ, reshape(Cp, nω, 4, 2, 2, 3, ni, 2), reshape(Cm, nω, 4, 2, 2, 3, ni, 2),
+    apply_phonon_exchange_kernel!(KJ, reshape(Cp, nω, 4, 2, 2, 3, ni, 2), reshape(Cm, nω, 4, 2, 2, 3, ni, 2),
         K, Y, KY)
     attach_greens_to_vertex!(LJ, Gm, KJ, Gp)
     LJ .*= -1
@@ -313,7 +316,8 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
             contour_greens!(Gm, Gp, ε_i, Σd_m, Σd_p, ωs, Ω, μ[iT], T)
             attach_greens_to_bare_vertex!(J0, Gm, v, Gp)
             σ_bubble[:, :, iΩ, iT] = conductivity_from_vertex(J0, v, w_i, Wω, Ω, T)
-            ladder_kernel_TΩ!(LJ_, J_) = apply_ladder_kernel!(LJ_, J_, ladder, workspace, Gm, Gp, T; ω_acoustic)
+            ladder_kernel_TΩ!(LJ_, J_) =
+                apply_ladder_kernel!(LJ_, J_, ladder, workspace, Gm, Gp, T; ω_acoustic)
 
             if solver === :gmres
                 # (I - L) J = J0, warm-started from the previous Ω at this T.

@@ -10,7 +10,7 @@ function hat_value(y, ωs, x)
     (1 - t) * y[k] + t * y[k+1]
 end
 
-# L(J) = -Gm (s ⊙ K[J]) Gp by loops, with the channel sums of `phonon_exchange_kernel!`.
+# L(J) = -Gm (s ⊙ K[J]) Gp by loops, with the channel sums of `apply_phonon_exchange_kernel!`.
 function naive_apply_ladder(ladder, J, Gm, Gp, T, ω_acoustic)
     (; g2, ωph, iq_kk, iks_i, iks_f, w_f, f_to_i, R, ωs, K) = ladder
     nm, ni, nf = size(g2)
@@ -95,17 +95,19 @@ end
 
     @testset "stars of inner states and chunks" begin
         pb = pb_ladder_case()
-        (; inner_states_by_star, star_ptr, f_to_i) = pb.ladder
+        (; inner_states_by_star, inner_star_ptr, f_to_i) = pb.ladder
         ni = pb.res.el_i.n
         @test length(inner_states_by_star) == length(f_to_i) && sort(inner_states_by_star) == eachindex(f_to_i)
-        @test star_ptr[1] == 1 && star_ptr[end] == length(f_to_i) + 1
-        @test all(i -> all(==(i), f_to_i[inner_states_by_star[star_ptr[i]:star_ptr[i + 1] - 1]]), 1:ni)
+        @test inner_star_ptr[1] == 1 && inner_star_ptr[end] == length(f_to_i) + 1
+        @test all(1:ni) do i
+            all(==(i), f_to_i[inner_states_by_star[inner_star_ptr[i]:inner_star_ptr[i + 1] - 1]])
+        end
         # Every outer state is in exactly one chunk, and a chunk holds whole stars.
         for gpu_tile in (nothing, 7, 100)
             chunks = EPSpectral._ladder_workspace(pb.ladder, EP.CPUBackend(), gpu_tile, 0).chunks
             @test reduce(vcat, [collect(c.ips) for c in chunks]) == 1:ni
             @test sum(c.nf for c in chunks) == length(f_to_i)
-            @test all(c -> c.nf == star_ptr[last(c.ips) + 1] - star_ptr[first(c.ips)], chunks)
+            @test all(c -> c.nf == inner_star_ptr[last(c.ips) + 1] - inner_star_ptr[first(c.ips)], chunks)
         end
     end
 

@@ -45,7 +45,8 @@ end
 Fill the left and right propagators `Gm[ω, c12, i] = G(ωs[ω] - Ω/2)` and `Gp[ω, c12, i] =
 G(ωs[ω] + Ω/2)` of the states with energies `ε_i`, from [`_contour_green`](@ref). `Σd_m[ω, i]` and
 `Σd_p[ω, i]` are the self-energy at `ωs - Ω/2` and `ωs + Ω/2`, which the caller reads from `ωs`
-with [`linear_interpolation_table`](@ref) and [`apply_interpolation_table!`](@ref) (flat outside the grid, unclamped).
+with [`linear_interpolation_table`](@ref) and [`apply_interpolation_table!`](@ref) (flat outside the grid,
+unclamped).
 """
 function contour_greens!(Gm, Gp, ε_i, Σd_m, Σd_p, ωs, Ω, μ, T)
     c12 = reshape(1:4, 1, 4, 1)
@@ -130,7 +131,7 @@ end
 #
 # The inner states f are grouped by their IBZ representative i' (the star of i'), and the rotation
 # R_f of the unfolded vertex is folded into the coupling, so that the sums U±, V± of
-# `phonon_exchange_kernel!` are GEMMs over (m, b, i') with no gather of the vertex per inner state:
+# `apply_phonon_exchange_kernel!` are GEMMs over (m, b, i') with no gather of the vertex per inner state:
 #
 #     U±_i[row] = Σ_{m,b,i'} X±[row, (m, b, i')] B̃[(m, b, i'), (a, i, 1)],   V±: type 2,
 #     B[m, f, i, 1] = w_f Σ_ν g2[ν, i, f] tent(ω_νfi / h - m),    B[., ., ., 2] has n_B(ω_νfi) too,
@@ -209,7 +210,7 @@ end
 # has the extra n_B factor `nB[ν, f, i]`. `f` is the position in the chunk, `fidx[f]` the inner
 # state it holds in `g2`, `m` the shift index in units of h, from 0. A mode below `ω_acoustic` is
 # skipped before g2 is read (g2 is Inf or huge at Γ-acoustic).
-@inline function _coupling_shift_bin_term(g2, fidx, ωq, nB, w_f, h, ω_acoustic, m, f, i, type)
+@inline function _bin_coupling_on_shift_grid_term(g2, fidx, ωq, nB, w_f, h, ω_acoustic, m, f, i, type)
     acc = zero(eltype(g2))
     for ν in axes(ωq, 1)
         ω = ωq[ν, f, i]
@@ -234,8 +235,8 @@ function bin_coupling_on_shift_grid!(B, g2, fidx, ωq, nB, w_f, dω_shift, ω_ac
     i = reshape(axes(B, 3), 1, 1, :, 1)
     type = reshape(axes(B, 4), 1, 1, 1, :)
     _threaded_on_host(B, axes(B, 2)) do fs
-        view(B, :, fs, :, :) .= _coupling_shift_bin_term.(Ref(g2), Ref(fidx), Ref(ωq), Ref(nB), Ref(w_f),
-            dω_shift, ω_acoustic, m, reshape(fs, 1, :, 1, 1), i, type)
+        view(B, :, fs, :, :) .= _bin_coupling_on_shift_grid_term.(Ref(g2), Ref(fidx), Ref(ωq), Ref(nB),
+            Ref(w_f), dω_shift, ω_acoustic, m, reshape(fs, 1, :, 1, 1), i, type)
     end
     B
 end
@@ -254,16 +255,17 @@ end
     star_sum_coupling!(Bt, B, R, fidx, star_ptr) -> Bt
 
 Fill `Bt[m, b, ip, a, i, type] = Σ_{f in star(ip)} R[a, b, fidx[f]] B[m, f, i, type]` for the outer
-states `ip` of a chunk, from the coupling `B` of the chunk's inner states ([`bin_coupling_on_shift_grid!`](@ref)),
-the rotations `R[:, :, f]` of all inner states, `fidx[f]` (the inner state at chunk position `f`)
-and the star boundaries `star_ptr` (the star of `ip` holds the chunk positions `star_ptr[ip]:star_ptr[ip + 1] - 1`).
+states `ip` of a chunk, from the coupling `B` of the chunk's inner states
+([`bin_coupling_on_shift_grid!`](@ref)), the rotations `R[:, :, f]` of all inner states, `fidx[f]` (the
+inner state at chunk position `f`) and the star boundaries `star_ptr` (the star of `ip` holds the chunk
+positions `star_ptr[ip]:star_ptr[ip + 1] - 1`).
 """
 function star_sum_coupling!(Bt, B, R, fidx, star_ptr)
     index(n, dim) = reshape(1:n, ntuple(d -> d == dim ? n : 1, 6))
     m, b, _, a, i, type = (index(size(Bt, d), d) for d in 1:6)
     _threaded_on_host(Bt, axes(Bt, 3)) do ips
-        view(Bt, :, :, ips, :, :, :) .= _star_sum_coupling_term.(Ref(B), Ref(R), Ref(fidx), Ref(star_ptr), m, b,
-            reshape(ips, 1, 1, :, 1, 1, 1), a, i, type)
+        view(Bt, :, :, ips, :, :, :) .= _star_sum_coupling_term.(Ref(B), Ref(R), Ref(fidx), Ref(star_ptr),
+            m, b, reshape(ips, 1, 1, :, 1, 1, 1), a, i, type)
     end
     Bt
 end
@@ -299,7 +301,7 @@ end
 #   K¹¹ = -i KK[½(U+ - U-)] - ½(U+ + U-) - (V+ + V-)      K²² = same with +i
 #   K²¹ = -(V+ + U- + V-)                                  K¹² = -(U+ + V+ + V-)
 # and K²¹, K¹² carry s_a s_b = -1.
-@inline function _phonon_exchange_kernel_term(Cp, Cm, KY, ω, c12, a, c0, i)
+@inline function _apply_phonon_exchange_kernel_term(Cp, Cm, KY, ω, c12, a, c0, i)
     sum_c(C, type) = complex(C[ω, c12, c0, 1, a, i, type], C[ω, c12, c0, 2, a, i, type])
     Up, Um, Vp, Vm = sum_c(Cp, 1), sum_c(Cm, 1), sum_c(Cp, 2), sum_c(Cm, 2)
     if c12 == 1 || c12 == 4
@@ -313,7 +315,7 @@ end
 end
 
 """
-    phonon_exchange_kernel!(KJ, Cp, Cm, KK, Y, KY) -> KJ
+    apply_phonon_exchange_kernel!(KJ, Cp, Cm, KK, Y, KY) -> KJ
 
 The channels `KJ[ω, c12, cart, c0, i] = s_a s_b K^{ab}[J]` of the ladder kernel (`c12` = (a, b),
 `s_1 = 1`, `s_2 = -1`) from the shift sums `Cp`, `Cm` = `[U; V]` of the upward and downward shifts,
@@ -321,8 +323,8 @@ each of size `(nω, 4, 2, 2, 3, ni, 2)` (c12, c0, real/imaginary part, cart, the
 The principal-value part is `KK` (the spline Kramers-Kronig matrix) applied to `½(U+ - U-)`; `Y`
 and `KY` are real work arrays of size `(nω, 4, 2, 2, 3, ni)`.
 """
-function phonon_exchange_kernel!(KJ, Cp, Cm, KK, Y, KY)
+function apply_phonon_exchange_kernel!(KJ, Cp, Cm, KK, Y, KY)
     Y .= (view(Cp, :, :, :, :, :, :, 1) .- view(Cm, :, :, :, :, :, :, 1)) ./ 2
     mul!(reshape(KY, size(KY, 1), :), KK, reshape(Y, size(Y, 1), :))
-    KJ .= _phonon_exchange_kernel_term.(Ref(Cp), Ref(Cm), Ref(KY), _vertex_broadcast_indices(KJ)...)
+    KJ .= _apply_phonon_exchange_kernel_term.(Ref(Cp), Ref(Cm), Ref(KY), _vertex_broadcast_indices(KJ)...)
 end
