@@ -19,7 +19,7 @@ end
 # The scGD0 iteration as a scalar problem in ω: with constant g2 and ω0, Σ is k-independent and
 # the Fan-Migdal sum only needs the local G. Same grids, clamp, flat linear interpolation,
 # Kramers-Kronig, rectangle-rule spectral weight and bracketed μ root as the package, each written
-# out here.
+# out here. The Fan-Migdal input is read from Σ on ωs, the spectral weight from Σ on ωs_dense.
 # Returns Σ on ωs and μ after `niter` iterations.
 function holstein_1d_local_scgd0(ωs, ωs_dense; nk, t, ω0, g2, T, η_init, η_min = 0.0, μ_start,
         niter, fix_μ, n_target, spin_degeneracy)
@@ -31,8 +31,8 @@ function holstein_1d_local_scgd0(ωs, ωs_dense; nk, t, ω0, g2, T, η_init, η_
     Σ = fill(complex(0.0, -η_init), length(ωs))
     μ = μ_start
     for _ in 1:niter
-        Σin = [complex(real(z), min(imag(z), -η_min)) for z in on_dense(Σ)]
-        Σin_itp = extrapolate(scale(interpolate(Σin, BSpline(Linear())), ωs_dense), Flat())
+        Σin = [complex(real(z), min(imag(z), -η_min)) for z in Σ]
+        Σin_itp = extrapolate(interpolate((ωs,), Σin, Gridded(Linear())), Flat())
         ImG_loc(x) = imag(sum(1 / (x - ε - Σin_itp(x)) for ε in εs) / nk)
         ImΣ = [g2 * (ImG_loc(ω + ω0) * (n_B + f(ω + ω0 - μ))
                      + ImG_loc(ω - ω0) * (n_B + 1 - f(ω - ω0 - μ))) for ω in ωs]
@@ -61,13 +61,14 @@ function holstein_1d_loop_setup(; nk, t, ω0, g2, ωs, μ_start)
     ni = nk ÷ 2 + 1
     εs = holstein_1d_energies(nk, t)
     ωs_dense = range(extrema(ωs)...; step = minimum(diff(ωs)))
+    j_dense, t_dense = EPSpectral.interp_table(ωs, ωs_dense)
     (; g2 = fill(g2, 1, ni, nk), ωph = fill(ω0, 1, nk),
        iq_kk = Int32[mod(jf - ji, nk) + 1 for ji in 0:ni-1, jf in 0:nk-1],
        iks_i = 1:ni, iks_f = 1:nk, ε_i = εs[1:ni],
        w_i = [(j == 0 || 2j == nk ? 1 : 2) / nk for j in 0:ni-1],
        ε_f = εs, w_f = fill(1 / nk, nk), f_to_i = [min(j, nk - j) + 1 for j in 0:nk-1],
        W = 1.0, nstates_base = 0.0, multiplets = Vector{Int}[], ωs, ωs_dense,
-       K = EPSpectral.kk_matrix(ωs), P = EPSpectral.interp_matrix(ωs, ωs_dense), μ_start)
+       j_dense, t_dense, K = EPSpectral.kk_matrix(ωs), μ_start)
 end
 
 # `_loop_scgd0` with the keywords `run_scgd0` would pass for a CPU run.

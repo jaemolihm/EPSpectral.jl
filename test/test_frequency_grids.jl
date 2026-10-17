@@ -38,30 +38,33 @@
         @test norm(EPSpectral.kk_matrix(xg) * zg - y_ref) <= 1e-8 * norm(y_ref)
     end
 
-    @testset "interp_matrix" begin
-        # Targets beyond both ends of ωs cover the flat extrapolation.
-        xs = range(ωs[1] - 0.05, ωs[end] + 0.05; length = 1111)
-        y = pseudorandom_complex(length(ωs); seed = 2)
-        P = EPSpectral.interp_matrix(ωs, xs)
-        @test eltype(P) == ComplexF64
-        y_ref = extrapolate(interpolate((ωs,), y, Gridded(Linear())), Flat()).(xs)
-        @test norm(P * y - y_ref) <= 1e-13 * norm(y_ref)
-        @test size(EPSpectral.interp_matrix(ωs, ωs_dense)) == (length(ωs_dense), length(ωs))
+    # Targets beyond both ends of ωs, exactly on its nodes, and on the dense grid.
+    n_out = 997
+    xs = vcat(range(ωs[1] - 0.05, ωs[end] + 0.05; length = n_out), ωs, collect(ωs_dense))
+    itp(y) = extrapolate(interpolate((ωs,), y, Gridded(Linear())), Flat())
+
+    @testset "interp_table, interp_apply!" begin
+        y = pseudorandom_complex(length(ωs), 3; seed = 2)
+        j, t = EPSpectral.interp_table(ωs, xs)
+        @test j isa Vector{Int32} && t isa Vector{Float64}
+        @test all(in(1:length(ωs) - 1), j) && all(x -> 0 <= x <= 1, t)
+        Y = zeros(ComplexF64, length(xs), 3)
+        @test EPSpectral.interp_apply!(Y, y, j, t) === Y
+        Y_ref = stack(itp(y[:, i]).(xs) for i in 1:3)
+        @test norm(Y - Y_ref) <= 1e-13 * norm(Y_ref)
+        # Outside the grid the table returns the end values exactly.
+        @test Y[1, :] == y[1, :] && Y[n_out, :] == y[end, :]
     end
 
-    @testset "_interp_linear_uniform" begin
-        # The dense-grid lookup of the Fan-Migdal kernel, against Interpolations' uniform-grid
-        # linear interpolation with flat extrapolation, inside and outside the grid. The two round
-        # the grid position (x - ωd0)/dωd differently (Interpolations in the range's
-        # TwicePrecision arithmetic), which on this data with O(1) jumps between neighbouring
-        # points gives 2.4e-14.
-        Σin = pseudorandom_complex(length(ωs_dense), 3; seed = 4)
-        ωd0, dωd = first(ωs_dense), step(ωs_dense)
-        xs = vcat(range(ωs[1] - 0.05, ωs[end] + 0.05; length = 997), collect(ωs_dense))
+    @testset "_interp_linear_grid" begin
+        # The Fan-Migdal lookup against Interpolations' `Gridded(Linear())` with `Flat()`, on the
+        # nonuniform grid, inside, on the nodes and outside, and at a NaN (the first value).
+        Σin = pseudorandom_complex(length(ωs), 3; seed = 4)
         for col in axes(Σin, 2)
-            itp = extrapolate(scale(interpolate(Σin[:, col], BSpline(Linear())), ωs_dense), Flat())
-            err = maximum(abs(EPSpectral._interp_linear_uniform(Σin, col, x, ωd0, dωd) - itp(x)) for x in xs)
-            @test err <= 5e-14 * maximum(abs, Σin)
+            f = itp(Σin[:, col])
+            err = maximum(abs(EPSpectral._interp_linear_grid(Σin, col, x, ωs) - f(x)) for x in xs)
+            @test err <= 1e-13 * maximum(abs, Σin)
+            @test EPSpectral._interp_linear_grid(Σin, col, NaN, ωs) == Σin[1, col]
         end
     end
 end

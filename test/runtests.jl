@@ -2,7 +2,7 @@ using Test
 using EPSpectral
 using ElectronPhonon
 using LinearAlgebra: norm
-using Interpolations: interpolate, extrapolate, scale, Gridded, BSpline, Linear, Flat
+using Interpolations: interpolate, extrapolate, Gridded, Linear, Flat
 const EP = ElectronPhonon
 
 # Optional GPU dependency for the CPU-vs-GPU testsets (skipped if absent).

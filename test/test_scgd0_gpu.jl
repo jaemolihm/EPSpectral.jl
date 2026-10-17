@@ -54,9 +54,10 @@
         @test res_gpu.μ ≈ res_cpu.μ rtol = 1e-8
         # Spectral DOS D_T(ωd) = Σ_i w_i A_i(ωd) dω from each run's Σ; it carries the same
         # split-sized residual (measured 9.3e-8).
-        P = EPSpectral.interp_matrix(ωs, ωs_dense)
         function spectral_dos(Σ, iT)
-            A = .-imag.(inv.(ωs_dense .- transpose(el.es) .- P * Σ[:, :, iT])) ./ π
+            Σd = stack(extrapolate(interpolate((ωs,), Σ[:, i, iT], Gridded(Linear())), Flat()
+                ).(ωs_dense) for i in axes(Σ, 2))
+            A = .-imag.(inv.(ωs_dense .- transpose(el.es) .- Σd)) ./ π
             A * state_weights(el) .* step(ωs_dense)
         end
         for iT in eachindex(occ.Tlist)
