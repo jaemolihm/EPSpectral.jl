@@ -24,7 +24,7 @@
             # k -> -k: 33 irreducible of 64.
             @test size(res.Σ) == (length(ωs), nk ÷ 2 + 1, 1)
             ImΣ = holstein_1d_oneshot_imsigma(ωs; nk, t, ω0, g2, T, μ = μ_fixed, η = η_init)
-            Σ_ref = complex.(EPSpectral.kk_matrix(ωs) * ImΣ, ImΣ)
+            Σ_ref = complex.(EPSpectral.kramers_kronig_matrix(ωs) * ImΣ, ImΣ)
             @test maximum(norm(res.Σ[:, i, 1] - Σ_ref) for i in axes(res.Σ, 2)) <=
                 1e-12 * norm(Σ_ref)
             @test res.μ == [μ_fixed]

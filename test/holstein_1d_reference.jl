@@ -36,7 +36,7 @@ function holstein_1d_local_scgd0(ωs, ωs_dense; nk, t, ω0, g2, T, η_init, η_
         ImG_loc(x) = imag(sum(1 / (x - ε - Σin_itp(x)) for ε in εs) / nk)
         ImΣ = [g2 * (ImG_loc(ω + ω0) * (n_B + f(ω + ω0 - μ))
                      + ImG_loc(ω - ω0) * (n_B + 1 - f(ω - ω0 - μ))) for ω in ωs]
-        Σ = complex.(EPSpectral.kk_matrix(ωs) * ImΣ, ImΣ)
+        Σ = complex.(EPSpectral.kramers_kronig_matrix(ωs) * ImΣ, ImΣ)
         fix_μ && continue
         Σd = on_dense(Σ)
         D = [sum(-imag(1 / (ω - ε - Σd[r])) / π for ε in εs) / nk * dω
@@ -61,7 +61,7 @@ function holstein_1d_loop_setup(; nk, t, ω0, g2, ωs, μ_start)
     ni = nk ÷ 2 + 1
     εs = holstein_1d_energies(nk, t)
     ωs_dense = range(extrema(ωs)...; step = minimum(diff(ωs)))
-    j_dense, t_dense = EPSpectral.interp_table(ωs, ωs_dense)
+    j_dense, t_dense = EPSpectral.linear_interpolation_table(ωs, ωs_dense)
     (; g2 = fill(g2, 1, ni, nk), ωph = fill(ω0, 1, nk),
        iq_kk = Int32[mod(jf - ji, nk) + 1 for ji in 0:ni-1, jf in 0:nk-1],
        iks_i = 1:ni, iks_f = 1:nk, ε_i = εs[1:ni],
@@ -69,7 +69,7 @@ function holstein_1d_loop_setup(; nk, t, ω0, g2, ωs, μ_start)
        ε_f = εs, w_f = fill(1 / nk, nk), f_to_i = [min(j, nk - j) + 1 for j in 0:nk-1],
        W = 1.0, nstates_base = 0.0, multiplets = Vector{Int}[], ωs,
        ωs_buckets = EPSpectral.bucket_table(EP.CPUBackend(), ωs), ωs_dense,
-       j_dense, t_dense, K = EPSpectral.kk_matrix(ωs), μ_start)
+       j_dense, t_dense, K = EPSpectral.kramers_kronig_matrix(ωs), μ_start)
 end
 
 # `_loop_scgd0` with the keywords `run_scgd0` would pass for a CPU run.

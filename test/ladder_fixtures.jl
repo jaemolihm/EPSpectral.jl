@@ -37,18 +37,18 @@ with_shift_step(case, dω_shift) = ladder_case(case.model, case.nk, case.window,
 function ladder_propagators(case, iT, Ω)
     (; res, ωs) = case
     Σd_m, Σd_p = (similar(res.Σ[:, :, iT]) for _ in 1:2)
-    EPSpectral.interp_apply!(Σd_m, res.Σ[:, :, iT], EPSpectral.interp_table(ωs, ωs .- Ω / 2)...)
-    EPSpectral.interp_apply!(Σd_p, res.Σ[:, :, iT], EPSpectral.interp_table(ωs, ωs .+ Ω / 2)...)
+    EPSpectral.apply_interpolation_table!(Σd_m, res.Σ[:, :, iT], EPSpectral.linear_interpolation_table(ωs, ωs .- Ω / 2)...)
+    EPSpectral.apply_interpolation_table!(Σd_p, res.Σ[:, :, iT], EPSpectral.linear_interpolation_table(ωs, ωs .+ Ω / 2)...)
     Gm, Gp = (zeros(ComplexF64, length(ωs), 4, res.el_i.n) for _ in 1:2)
     EPSpectral.contour_greens!(Gm, Gp, res.el_i.es, Σd_m, Σd_p, ωs, Ω, res.μ[iT], res.Tlist[iT])
     Gm, Gp
 end
 
-# The work arrays and `apply_ladder!` of a case, with chunks of `gpu_tile` inner states.
+# The work arrays and `apply_ladder_kernel!` of a case, with chunks of `gpu_tile` inner states.
 function apply_ladder_case(case, J, iT, Ω; gpu_tile = nothing)
     (; ladder, res) = case
     Gm, Gp = ladder_propagators(case, iT, Ω)
-    work = EPSpectral._ladder_work(ladder, EP.CPUBackend(), gpu_tile, 0)
+    workspace = EPSpectral._ladder_workspace(ladder, EP.CPUBackend(), gpu_tile, 0)
     LJ = similar(J)
-    EPSpectral.apply_ladder!(LJ, J, ladder, work, Gm, Gp, res.Tlist[iT]; ω_acoustic = EP.omega_acoustic)
+    EPSpectral.apply_ladder_kernel!(LJ, J, ladder, workspace, Gm, Gp, res.Tlist[iT]; ω_acoustic = EP.omega_acoustic)
 end

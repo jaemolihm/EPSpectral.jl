@@ -19,7 +19,7 @@ function linear_spline_kramers_kronig(x, x1, x2, x3)
 end
 
 """
-    kk_matrix(ωs) -> K::Matrix{Float64}
+    kramers_kronig_matrix(ωs) -> K::Matrix{Float64}
 
 The Kramers-Kronig matrix on the grid `ωs`: for `z` the imaginary part of a retarded function
 sampled on `ωs`, `K * z` is its real part `1/π P∫ dω' z(ω') / (ω' - ω)` at the nodes, with `z`
@@ -27,7 +27,7 @@ replaced by its hat-basis (piecewise-linear) interpolant and the integral done e
 any grid. Each end value carries a hat that decays linearly to zero over one more cell, of the
 width of the end cell, beyond the grid.
 """
-function kk_matrix(ωs)
+function kramers_kronig_matrix(ωs)
     N = length(ωs)
     # Pad the grid by one end cell on each side.
     x0 = ωs[1] - (ωs[2] - ωs[1])
@@ -54,15 +54,15 @@ trapezoid_weights(ωs) =
     [(ωs[min(j + 1, end)] - ωs[max(j - 1, 1)]) / 2 for j in eachindex(ωs)]
 
 """
-    interp_table(ωs, xs) -> (j::Vector{Int32}, t::Vector{eltype(ωs)})
+    linear_interpolation_table(ωs, xs) -> (j::Vector{Int32}, t::Vector{eltype(ωs)})
 
 The table of linear interpolation from the sorted grid `ωs` to the points `xs`, held flat outside
 `ωs` (`Gridded(Linear())` with `Flat()` extrapolation in Interpolations.jl): `y(xs[r])` is
 `(1 - t[r]) y[j[r]] + t[r] y[j[r] + 1]`. Inside, `ωs[j] <= x < ωs[j+1]` and `t` is the position in
 that cell; below `ωs` the table is `(1, 0)`, above it `(length(ωs) - 1, 1)`. Apply it with
-[`interp_apply!`](@ref).
+[`apply_interpolation_table!`](@ref).
 """
-function interp_table(ωs, xs)
+function linear_interpolation_table(ωs, xs)
     FT = eltype(ωs)
     n = length(ωs)
     j = Vector{Int32}(undef, length(xs))
@@ -84,13 +84,13 @@ function interp_table(ωs, xs)
 end
 
 """
-    interp_apply!(Y, Σ, j, t) -> Y
+    apply_interpolation_table!(Y, Σ, j, t) -> Y
 
-Apply the table `(j, t)` of [`interp_table`](@ref) to the columns of `Σ`:
+Apply the table `(j, t)` of [`linear_interpolation_table`](@ref) to the columns of `Σ`:
 `Y[r, i] = (1 - t[r]) Σ[j[r], i] + t[r] Σ[j[r] + 1, i]`. A gather broadcast over backend arrays, so
 it runs on the host and on the device and is deterministic.
 """
-function interp_apply!(Y, Σ, j, t)
+function apply_interpolation_table!(Y, Σ, j, t)
     lerp(Σ, jr, tr, i) = (1 - tr) * Σ[jr, i] + tr * Σ[jr + 1, i]
     Y .= lerp.(Ref(Σ), j, t, reshape(axes(Y, 2), 1, :))
 end
@@ -147,7 +147,7 @@ end
 """
     kramers_kronig(ωs, zs) -> ys
 
-Real part `ys = kk_matrix(ωs) * zs` of the retarded function whose imaginary part is `zs` on the
-grid `ωs`; see [`kk_matrix`](@ref) for the interpolation and end conventions.
+Real part `ys = kramers_kronig_matrix(ωs) * zs` of the retarded function whose imaginary part is `zs` on the
+grid `ωs`; see [`kramers_kronig_matrix`](@ref) for the interpolation and end conventions.
 """
-kramers_kronig(ωs, zs) = kk_matrix(ωs) * zs
+kramers_kronig(ωs, zs) = kramers_kronig_matrix(ωs) * zs

@@ -1,5 +1,5 @@
 # The ladder kernel on the host: the commensurability check, the shift tables, and one application
-# of the kernel `apply_ladder!` against a naive loop over (i, f, ν, j) that evaluates the shifted
+# of the kernel `apply_ladder_kernel!` against a naive loop over (i, f, ν, j) that evaluates the shifted
 # vertex by exact hat-basis interpolation at ωs[j] ± ω_q, with no shift grid.
 
 # Linear interpolation of y on the sorted grid ωs, zero outside.
@@ -10,7 +10,7 @@ function hat_value(y, ωs, x)
     (1 - t) * y[k] + t * y[k+1]
 end
 
-# L(J) = -Gm (s ⊙ K[J]) Gp by loops, with the channel sums of `combine_channels!`.
+# L(J) = -Gm (s ⊙ K[J]) Gp by loops, with the channel sums of `apply_phonon_exchange_kernel!`.
 function naive_apply_ladder(ladder, J, Gm, Gp, T, ω_acoustic)
     (; g2, ωph, iq_kk, iks_i, iks_f, w_f, f_to_i, R, ωs, K) = ladder
     nm, ni, nf = size(g2)
@@ -56,21 +56,21 @@ end
 @testset "ladder kernel" begin
     @testset "commensurability check" begin
         ωs = vcat(0.0:0.05:0.5, 0.52:0.02:0.8)
-        @test EPSpectral.check_commensurate(ωs, 0.01) === nothing
-        @test EPSpectral.check_commensurate(ωs, 0.005) === nothing
+        @test EPSpectral.check_frequency_grid_commensurate(ωs, 0.01) === nothing
+        @test EPSpectral.check_frequency_grid_commensurate(ωs, 0.005) === nothing
         # A step that does not divide the grid: the error names the compatible step.
-        err = try; EPSpectral.check_commensurate(ωs, 0.03); catch e; e; end
+        err = try; EPSpectral.check_frequency_grid_commensurate(ωs, 0.03); catch e; e; end
         @test err isa ArgumentError
         @test occursin("dω_shift = 0.01", err.msg) && occursin("factor 3", err.msg)
         # A grid with no compatible step.
-        err = try; EPSpectral.check_commensurate([0.0, 1.0, 1.0 + sqrt(2) / 100], 1.0); catch e; e; end
+        err = try; EPSpectral.check_frequency_grid_commensurate([0.0, 1.0, 1.0 + sqrt(2) / 100], 1.0); catch e; e; end
         @test err isa ArgumentError && occursin("No step", err.msg)
     end
 
     @testset "one regrouped shift against the direct interpolation" begin
         ωs = vcat(-1.0:0.1:-0.4, -0.35:0.05:0.35, 0.4:0.1:1.0)
         h, M = 0.05, 12
-        (; klo, wlo, whi) = EPSpectral.shift_tables(ωs, h, M)
+        (; klo, wlo, whi) = EPSpectral.vertex_shift_tables(ωs, h, M)
         y0 = pseudorandom_complex(length(ωs); seed = 0.7)
         # y vanishes at the end nodes, where the regrouping is exact on the closed table values.
         y = copy(y0); y[1] = y[end] = 0
@@ -95,21 +95,23 @@ end
 
     @testset "stars of inner states and chunks" begin
         pb = pb_ladder_case()
-        (; fperm, fptr, f_to_i) = pb.ladder
+        (; inner_states_by_star, inner_star_ptr, f_to_i) = pb.ladder
         ni = pb.res.el_i.n
-        @test length(fperm) == length(f_to_i) && sort(fperm) == eachindex(f_to_i)
-        @test fptr[1] == 1 && fptr[end] == length(f_to_i) + 1
-        @test all(i -> all(==(i), f_to_i[fperm[fptr[i]:fptr[i + 1] - 1]]), 1:ni)
+        @test length(inner_states_by_star) == length(f_to_i) && sort(inner_states_by_star) == eachindex(f_to_i)
+        @test inner_star_ptr[1] == 1 && inner_star_ptr[end] == length(f_to_i) + 1
+        @test all(1:ni) do i
+            all(==(i), f_to_i[inner_states_by_star[inner_star_ptr[i]:inner_star_ptr[i + 1] - 1]])
+        end
         # Every outer state is in exactly one chunk, and a chunk holds whole stars.
         for gpu_tile in (nothing, 7, 100)
-            chunks = EPSpectral._ladder_work(pb.ladder, EP.CPUBackend(), gpu_tile, 0).chunks
+            chunks = EPSpectral._ladder_workspace(pb.ladder, EP.CPUBackend(), gpu_tile, 0).chunks
             @test reduce(vcat, [collect(c.ips) for c in chunks]) == 1:ni
             @test sum(c.nf for c in chunks) == length(f_to_i)
-            @test all(c -> c.nf == fptr[last(c.ips) + 1] - fptr[first(c.ips)], chunks)
+            @test all(c -> c.nf == inner_star_ptr[last(c.ips) + 1] - inner_star_ptr[first(c.ips)], chunks)
         end
     end
 
-    @testset "apply_ladder! against the naive loop" begin
+    @testset "apply_ladder_kernel! against the naive loop" begin
         eV = unit_to_aru(:eV)
         pb = pb_ladder_case()
         # Cases with a shift index k >= 1: the Holstein chain without symmetry (a symmetric chain
@@ -142,7 +144,7 @@ end
                 for gpu_tile in (nothing, 7)
                     LJ = apply_ladder_case(case, J, iT, Ω; gpu_tile)
                     err = norm(LJ - LJ_ref) / norm(LJ_ref)
-                    @info "apply_ladder! vs naive" name iT gpu_tile err kmax
+                    @info "apply_ladder_kernel! vs naive" name iT gpu_tile err kmax
                     @test err <= 1e-12
                 end
             end

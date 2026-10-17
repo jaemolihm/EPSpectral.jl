@@ -7,7 +7,7 @@
     ωs = range(-40., 40., step = 0.02)
     f = @. 1 / (ωs - ε + im * η)
 
-    K = EPSpectral.kk_matrix(ωs)
+    K = EPSpectral.kramers_kronig_matrix(ωs)
     re_kk = K * imag.(f)
     im_kk = -K * real.(f)
 
