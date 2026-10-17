@@ -32,9 +32,14 @@ function kk_matrix(ωs)
     x0 = ωs[1] - (ωs[2] - ωs[1])
     xN1 = ωs[end] + (ωs[end] - ωs[end-1])
     xs = vcat(x0, ωs, xN1)
-    tmap(collect(Iterators.product(1:N, 1:N))) do (i, j)
-        linear_spline_kramers_kronig(xs[i+1], xs[j], xs[j+1], xs[j+2]) / π
-    end :: Matrix{Float64}
+    K = Matrix{Float64}(undef, N, N)
+    # Column j is the response to the hat centred at ωs[j]; columns are independent.
+    tforeach(index_chunks(1:N; n = 4 * Threads.nthreads()); chunking = false) do js
+        for j in js, i in 1:N
+            K[i, j] = linear_spline_kramers_kronig(xs[i+1], xs[j], xs[j+1], xs[j+2]) / π
+        end
+    end
+    K
 end
 
 """
