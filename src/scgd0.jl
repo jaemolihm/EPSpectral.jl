@@ -134,6 +134,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
     end
     length(group) > 1 && push!(multiplets, group)
 
+    ωs_buckets = bucket_table(backend, collect(FT, ωs))
     ωs_dense = range(extrema(ωs)...; step = dω_dense)
     j_dense, t_dense = linear_interpolation_table(ωs, ωs_dense)
 
@@ -151,7 +152,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
        ε_f = to_device(backend, el_f.es), w_f = to_device(backend, state_weights(el_f)),
        f_to_i = to_device(backend, f_to_i), W = sum(state_weights(el_i)),
        nstates_base = el_i.nstates_base, multiplets,
-       ωs = to_device(backend, collect(FT, ωs)), ωs_dense,
+       ωs = to_device(backend, collect(FT, ωs)), ωs_buckets, ωs_dense,
        j_dense = to_device(backend, j_dense), t_dense = to_device(backend, t_dense),
        K = to_device(backend, kramers_kronig_matrix(ωs)), μ_start)
 end
@@ -162,7 +163,7 @@ end
 function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, Σ_init, fix_μ,
         ω_acoustic, verbosity)
     (; g2, ωph, iq_kk, iks_i, iks_f, ε_i, w_i, ε_f, w_f, f_to_i, W, nstates_base, multiplets, ωs,
-       ωs_dense, j_dense, t_dense, K) = setup
+       ωs_buckets, ωs_dense, j_dense, t_dense, K) = setup
     FT = eltype(g2)
     nm, ni, nf = size(g2)
     nω, nωd, nT = length(ωs), length(ωs_dense), length(occ)
@@ -253,7 +254,7 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
             νfs = nm * (first(fs) - 1) + 1:nm * last(fs)
             for iT in iTs
                 fm_imsigma_tile!(ImΣ[:, :, iT], reshape(g2_t, nνf, ni),
-                    reshape(ωq_t, nνf, ni), ωs, ε_νf[νfs], f_to_i_νf[νfs],
+                    reshape(ωq_t, nνf, ni), ωs, ωs_buckets, ε_νf[νfs], f_to_i_νf[νfs],
                     Σin[:, :, iT], μ[iT], occ.Tlist[iT], w_νf[νfs],
                     ω_acoustic)
             end

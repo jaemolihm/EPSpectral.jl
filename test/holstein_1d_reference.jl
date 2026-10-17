@@ -67,7 +67,8 @@ function holstein_1d_loop_setup(; nk, t, ω0, g2, ωs, μ_start)
        iks_i = 1:ni, iks_f = 1:nk, ε_i = εs[1:ni],
        w_i = [(j == 0 || 2j == nk ? 1 : 2) / nk for j in 0:ni-1],
        ε_f = εs, w_f = fill(1 / nk, nk), f_to_i = [min(j, nk - j) + 1 for j in 0:nk-1],
-       W = 1.0, nstates_base = 0.0, multiplets = Vector{Int}[], ωs, ωs_dense,
+       W = 1.0, nstates_base = 0.0, multiplets = Vector{Int}[], ωs,
+       ωs_buckets = EPSpectral.bucket_table(EP.CPUBackend(), ωs), ωs_dense,
        j_dense, t_dense, K = EPSpectral.kramers_kronig_matrix(ωs), μ_start)
 end
 
