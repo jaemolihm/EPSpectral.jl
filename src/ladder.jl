@@ -39,7 +39,7 @@ end
 
 """
     run_scgd0_ladder(model, nk, window, scgd0::SCGD0Result; occ, Ωs = [0.0], solver = :gmres,
-        rtol = 1e-2, maxiter = 30, dω_shift = minimum(diff(scgd0.ωs)), store_vertex = false,
+        rtol = 1e-2, maxiter = 30, dω_shift = nothing, store_vertex = false,
         kwargs...) -> SCGD0LadderResult
 
 The electron-only Kubo conductivity at every temperature of `scgd0` and every probe frequency
@@ -48,9 +48,11 @@ by the ladder of the scGD0 coupling, `J = J0 + L(J)` on the 2x2 Keldysh contour 
 Self-energy, chemical potential and temperatures come from `scgd0`; the e-ph coupling is extracted
 again for the same `model`, `nk` and `window`, which must give the same states as `scgd0.el_i`.
 
-`ωs = scgd0.ωs` must be commensurate with `dω_shift` (every node on `ωs[1] + dω_shift ℤ`); the
-cost grows as `1 / dω_shift`. `occ` supplies `spin_degeneracy` and `volume`, and its `Tlist` must
-equal `scgd0.Tlist`. The linear problem is solved for each `(T, Ω)` in turn by
+`ωs = scgd0.ωs` must be commensurate with the shift step `dω_shift` (every node on
+`ωs[1] + dω_shift ℤ`); the cost grows as `1 / dω_shift`. `dω_shift = nothing` takes the largest such
+step, `minimum(diff(ωs)) / k` with the smallest `k <= 64` ([`ladder_shift_step`](@ref)); an explicit
+value is checked. [`graded_frequency_grid`](@ref) builds commensurate graded grids. `occ` supplies
+`spin_degeneracy` and `volume`, and its `Tlist` must equal `scgd0.Tlist`. The linear problem is solved for each `(T, Ω)` in turn by
 `solver = :gmres` (warm-started from the previous `Ω` at the same `T`; residual below `rtol` times
 the norm of `J0`, at most `maxiter` iterations) or `solver = :fixed_point` (from `J0`,
 `J ← J0 + L(J)` until the relative change of σ is below `rtol`). An unconverged solve returns its
@@ -62,7 +64,7 @@ per chunk, rounded up to whole stars), `ω_acoustic`, `electron_degen_cutoff`; t
 """
 function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
         occ::ElectronOccupationParams, Ωs = [zero(FT)], solver = :gmres, rtol = 1e-2, maxiter = 30,
-        dω_shift = minimum(diff(scgd0.ωs)), store_vertex = false, backend = CPUBackend(),
+        dω_shift = nothing, store_vertex = false, backend = CPUBackend(),
         symmetry = model.symmetry, gpu_tile = nothing, verbosity = 1,
         ω_acoustic = ElectronPhonon.omega_acoustic,
         electron_degen_cutoff = ElectronPhonon.electron_degen_cutoff, ep_kwargs...) where {FT}
@@ -82,7 +84,7 @@ function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
      isapprox(el_new.es, el_old.es; rtol = 1e-10)) || throw(ArgumentError(
         "the states of the new extraction differ from scgd0.el_i: run_scgd0_ladder needs the " *
         "same model, nk, window and symmetry as the run that produced scgd0"))
-    ladder = _setup_ladder(setup, scgd0, symmetry; dω_shift, backend)
+    ladder = _setup_ladder(setup, scgd0, symmetry; dω_shift, backend, verbosity)
     res = _loop_ladder(ladder, scgd0.Σ, scgd0.μ, scgd0.Tlist, collect(FT, Ωs); solver, rtol,
         maxiter, store_vertex, backend, gpu_tile, ω_acoustic, verbosity)
 
@@ -97,19 +99,21 @@ function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
     end
     SCGD0LadderResult(collect(FT, Ωs), collect(FT, scgd0.Tlist), collect(FT, scgd0.μ),
         to_symmetrized_σ(res.σ_bubble), to_symmetrized_σ(res.σ_ladder), res.converged, res.niter, res.history,
-        FT(dω_shift), res.J)
+        ladder.dω_shift, res.J)
 end
 
 # What the ladder needs on top of the `_setup_scgd0` fields: the rotation R[:, :, f] and IBZ
 # representative of every inner state (the averaged vector unfolding of ElectronPhonon, TR-odd, as
 # a dense array) and the inner states grouped by representative, the hat-basis shift tables on the
-# commensurate `ωs`, the quadrature weights and the band velocities v[cart, i].
+# commensurate `ωs` (`nshift` tables of step `dω_shift`, the last one always zero), the quadrature
+# weights and the band velocities v[cart, i]. `dω_shift = nothing` derives the step
+# ([`ladder_shift_step`](@ref)).
 # `symmetry === nothing` has no rotation.
-function _setup_ladder(setup, scgd0, symmetry; dω_shift, backend)
+function _setup_ladder(setup, scgd0, symmetry; dω_shift, backend, verbosity = 0)
     (; el_i, el_f, ωph) = setup
     FT = eltype(setup.g2)
     ωs = scgd0.ωs
-    check_frequency_grid_commensurate(ωs, dω_shift)
+    dω_shift = ladder_shift_step(ωs, dω_shift; verbosity)
 
     nf = el_f.n
     f_to_i = Array(setup.f_to_i)
@@ -144,13 +148,22 @@ function _setup_ladder(setup, scgd0, symmetry; dω_shift, backend)
     end
     inner_star_ptr = cumsum([1; star_sizes])
 
-    M = ceil(Int, maximum(ωph) / dω_shift) + 1
-    klo, wlo, whi = vertex_shift_tables(ωs, FT(dω_shift), M)
+    nshift = ceil(Int, maximum(ωph) / dω_shift) + 2
+    klo, wlo, whi = vertex_shift_tables(ωs, FT(dω_shift), nshift)
     (; setup..., inner_states_by_star, inner_star_ptr, R = to_device(backend, R),
-       klo = to_device(backend, klo), wlo = to_device(backend, wlo), whi = to_device(backend, whi), M, dω_shift = FT(dω_shift),
+       klo = to_device(backend, klo), wlo = to_device(backend, wlo), whi = to_device(backend, whi), nshift,
+       dω_shift = FT(dω_shift),
        Wω = to_device(backend, trapezoid_weights(ωs)),
        v = to_device(backend, reduce(hcat, el_i.vs)))
 end
+
+# The shapes of the chunk buffers `ωq` / `nB`, `B`, `Bt` and `X` of a chunk with `nf` inner and
+# `nip` outer states: `ωq[ν, f, i]`, `B[m, f, i, type]`, `Bt[m, b, ip, a, i, type]` and
+# `X[j, c12, c0, ri, m, b, ip]` (index legend in `ladder_kernel.jl`).
+_chunk_buffer_dims(ladder, nf, nip) = (; ωq = (size(ladder.g2, 1), nf, size(ladder.g2, 2)),
+    B = (ladder.nshift, nf, size(ladder.g2, 2), 2),
+    Bt = (ladder.nshift, 3, nip, 3, size(ladder.g2, 2), 2),
+    X = (length(ladder.ωs), 4, 2, 2, ladder.nshift, 3, nip))
 
 # The work arrays of `apply_ladder_kernel!` and its chunks, each a run of outer states with their stars of
 # inner states: at most `gpu_tile` inner states (at least one star). The buffers are held to
@@ -159,13 +172,14 @@ end
 # `_loop_scgd0`. `solver_bytes` is the device memory the solver allocates after this call (the
 # GMRES basis), which the residency decision leaves free.
 function _ladder_workspace(ladder, backend, gpu_tile, verbosity; solver_bytes = 0)
-    (; g2, ωs, M, inner_states_by_star, inner_star_ptr, w_f, iks_f) = ladder
+    (; g2, ωs, inner_states_by_star, inner_star_ptr, w_f, iks_f) = ladder
     FT = eltype(g2)
     nm, ni, nf = size(g2)
     nω = length(ωs)
     nrow = nω * 4 * 2 * 2
-    bytes_per_f = sizeof(FT) * max(2 * (M + 1) * ni, nm * ni)
-    bytes_per_i = sizeof(FT) * (M + 1) * max(3 * 3 * 2 * ni, 3 * nrow)
+    per_state = _chunk_buffer_dims(ladder, 1, 1)
+    bytes_per_f = sizeof(FT) * max(prod(per_state.B), prod(per_state.ωq))
+    bytes_per_i = sizeof(FT) * max(prod(per_state.Bt), prod(per_state.X))
     max_f = gpu_tile === nothing ? max(fld(CHUNK_BYTES, bytes_per_f), 1) : gpu_tile
     max_i = max(fld(CHUNK_BYTES, bytes_per_i), 1)
     # Chunk ranges: grow by outer states while both limits hold; the first state is always taken.
@@ -181,18 +195,18 @@ function _ladder_workspace(ladder, backend, gpu_tile, verbosity; solver_bytes = 
     end
     chunks = map(ranges) do ips
         inner = inner_states_by_star[inner_star_ptr[first(ips)]:inner_star_ptr[last(ips) + 1] - 1]
-        (; ips, nf = length(inner), fidx = to_device(backend, inner),
+        (; ips, nf = length(inner), fidx = to_device(backend, inner), fidx_host = inner,
             star_ptr = to_device(backend,
                 inner_star_ptr[first(ips):last(ips) + 1] .- inner_star_ptr[first(ips)] .+ 1),
             w_f = w_f[inner], iks_f = iks_f[inner])
     end
     nf_chunk = maximum(c -> c.nf, chunks)
     ni_chunk = maximum(c -> length(c.ips), chunks)
+    max_dims = _chunk_buffer_dims(ladder, nf_chunk, ni_chunk)
     workspace = (; chunks,
-        ωq_buf = alloc(backend, FT, nm * nf_chunk * ni), nB_buf = alloc(backend, FT, nm * nf_chunk * ni),
-        B_buf = alloc(backend, FT, 2 * (M + 1) * nf_chunk * ni),
-        Bt_buf = alloc(backend, FT, (M + 1) * 3 * ni_chunk * 3 * ni * 2),
-        X_buf = alloc(backend, FT, nrow * (M + 1) * 3 * ni_chunk),
+        ωq_buf = alloc(backend, FT, prod(max_dims.ωq)), nB_buf = alloc(backend, FT, prod(max_dims.ωq)),
+        B_buf = alloc(backend, FT, prod(max_dims.B)), Bt_buf = alloc(backend, FT, prod(max_dims.Bt)),
+        X_buf = alloc(backend, FT, prod(max_dims.X)),
         Cp = alloc(backend, FT, nrow, 3 * ni * 2), Cm = alloc(backend, FT, nrow, 3 * ni * 2),
         Y = alloc(backend, FT, nω, 4, 2, 2, 3, ni), KY = alloc(backend, FT, nω, 4, 2, 2, 3, ni),
         KJ = alloc(backend, Complex{FT}, nω, 4, 3, 2, ni))
@@ -229,7 +243,7 @@ combination ([`apply_phonon_exchange_kernel!`](@ref)). `ladder` is the output of
 `workspace` that of `_ladder_workspace`. Modes below `ω_acoustic` are skipped.
 """
 @views function apply_ladder_kernel!(LJ, J, ladder, workspace, Gm, Gp, T; ω_acoustic)
-    (; g2, ωph, iq_kk, iks_i, R, klo, wlo, whi, K, ωs, M, dω_shift) = ladder
+    (; g2, ωph, iq_kk, iks_i, R, klo, wlo, whi, K, ωs, nshift, dω_shift) = ladder
     (; chunks, streamed, g2_dev, g2_stage, ωq_buf, nB_buf, B_buf, Bt_buf, X_buf, Cp, Cm, Y, KY, KJ) =
         workspace
     nm, ni, _ = size(g2)
@@ -237,20 +251,24 @@ combination ([`apply_phonon_exchange_kernel!`](@ref)). `ladder` is the output of
     nrow = size(Cp, 1)
     fill!(Cp, 0)
     fill!(Cm, 0)
-    for (; ips, nf, fidx, star_ptr, w_f, iks_f) in chunks
+    for (; ips, nf, fidx, fidx_host, star_ptr, w_f, iks_f) in chunks
         nip = length(ips)
+        dims = _chunk_buffer_dims(ladder, nf, nip)
         # ωq[ν, f, i] and n_B(ωq), as in the Fan-Migdal sum.
-        ωq = reshape(ωq_buf[1:nm * nf * ni], nm, nf, ni)
+        ωq = reshape_buffer_view(ωq_buf, dims.ωq...)
         gather_pair_table!(ωq, ωph, transpose(iq_kk), iks_f, iks_i)
-        nB = reshape(nB_buf[1:nm * nf * ni], nm, nf, ni)
+        nB = reshape_buffer_view(nB_buf, dims.ωq...)
         _threaded_on_host(nB, axes(nB, 2)) do cs
             nB[:, cs, :] .= occ_boson.(ωq[:, cs, :], T)
         end
-        B = reshape(B_buf[1:2 * (M + 1) * nf * ni], M + 1, nf, ni, 2)
+        B = reshape_buffer_view(B_buf, dims.B...)
         if streamed
-            # The chunk's slabs g2[:, :, f], gathered on the host and copied to the device.
-            for (c, f) in enumerate(Array(fidx))
-                copyto!(g2_stage, nm * ni * (c - 1) + 1, g2, nm * ni * (f - 1) + 1, nm * ni)
+            # The chunk's slabs g2[:, :, f], gathered on the host (disjoint slabs, in parallel; the
+            # chunk's `fidx_host` is read-only) and copied to the device.
+            _threaded_on_host(g2_stage, eachindex(fidx_host)) do cs
+                for c in cs
+                    copyto!(g2_stage, nm * ni * (c - 1) + 1, g2, nm * ni * (fidx_host[c] - 1) + 1, nm * ni)
+                end
             end
             copyto!(g2_dev, 1, g2_stage, 1, nm * ni * nf)
             bin_coupling_on_shift_grid!(B, g2_dev, Base.OneTo(nf), ωq, nB, w_f, dω_shift, ω_acoustic)
@@ -258,14 +276,14 @@ combination ([`apply_phonon_exchange_kernel!`](@ref)). `ladder` is the output of
             # Resident: indexed in place.
             bin_coupling_on_shift_grid!(B, g2_dev, fidx, ωq, nB, w_f, dω_shift, ω_acoustic)
         end
-        Bt = reshape(Bt_buf[1:(M + 1) * 3 * nip * 3 * ni * 2], M + 1, 3, nip, 3, ni, 2)
+        Bt = reshape_buffer_view(Bt_buf, dims.Bt...)
         star_sum_coupling!(Bt, B, R, fidx, star_ptr)
-        Bt2 = reshape(Bt, (M + 1) * 3 * nip, 3 * ni * 2)
-        X = reshape(X_buf[1:nrow * (M + 1) * 3 * nip], nω, 4, 2, 2, M + 1, 3, nip)
+        Bt2 = reshape(Bt, nshift * 3 * nip, 3 * ni * 2)
+        X = reshape_buffer_view(X_buf, dims.X...)
         for (s, C) in ((1, Cp), (2, Cm))
             gather_shifted_vertex!(X, J, klo[:, :, s], wlo[:, :, s], whi[:, :, s], first(ips))
             # C += X B̃, threaded over row blocks of C on the host.
-            X2 = reshape(X, nrow, (M + 1) * 3 * nip)
+            X2 = reshape(X, nrow, nshift * 3 * nip)
             _threaded_on_host(C, axes(C, 1)) do rows
                 mul!(C[rows, :], X2[rows, :], Bt2, 1, 1)
             end

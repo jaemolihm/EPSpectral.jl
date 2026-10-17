@@ -151,3 +151,33 @@ Real part `ys = kramers_kronig_matrix(ωs) * zs` of the retarded function whose 
 grid `ωs`; see [`kramers_kronig_matrix`](@ref) for the interpolation and end conventions.
 """
 kramers_kronig(ωs, zs) = kramers_kronig_matrix(ωs) * zs
+
+"""
+    graded_frequency_grid(center, steps, half_widths) -> Vector
+
+A grid symmetric about `center` whose step grows outward: `steps[l]` applies out to distance
+`half_widths[l]` (increasing) from `center`. The nodes are `center + steps[1] p` for integers `p`
+(within `half_widths[1]`: all of them, within `half_widths[l]`: the multiples of `steps[l] / steps[1]`),
+so the grid is commensurate with `steps[1]` by construction, as the ladder
+([`run_scgd0_ladder`](@ref)) requires. Every ratio `steps[l] / steps[1]` must be an integer (to
+`1e-8`). The outermost node is the largest kept multiple not beyond `half_widths[end]`.
+"""
+function graded_frequency_grid(center, steps, half_widths)
+    length(steps) == length(half_widths) || throw(ArgumentError(
+        "steps and half_widths must have the same length, got $(length(steps)) and $(length(half_widths))"))
+    isempty(steps) && throw(ArgumentError("steps must not be empty"))
+    all(>(0), steps) && issorted(half_widths; lt = <=) && half_widths[1] > 0 || throw(ArgumentError(
+        "steps must be positive and half_widths positive and increasing"))
+    ratios = steps ./ steps[1]
+    for (l, ratio) in enumerate(ratios)
+        abs(ratio - round(ratio)) <= 1e-8 || throw(ArgumentError(
+            "steps[$l] = $(steps[l]) is not an integer multiple of steps[1] = $(steps[1]) (ratio $ratio)"))
+    end
+    ps = Int[]
+    for p in -floor(Int, half_widths[end] / steps[1] + 1e-8):floor(Int, half_widths[end] / steps[1] + 1e-8)
+        # The first region that contains the node; it keeps the multiples of its own step.
+        l = findfirst(w -> abs(p) <= w / steps[1] + 1e-8, half_widths)
+        p % round(Int, ratios[l]) == 0 && push!(ps, p)
+    end
+    center .+ steps[1] .* ps
+end

@@ -72,9 +72,10 @@ end
     Gm[ω, c1 + 2 * (c0 - 1), i] * v[cart, i] * Gp[ω, c0 + 2 * (c2 - 1), i]
 end
 
-# The index arrays of a broadcast over the five dimensions of `J[ω, c12, cart, c0, i]`.
-_vertex_broadcast_indices(J) = (axes(J, 1), reshape(axes(J, 2), 1, :), reshape(axes(J, 3), 1, 1, :),
-    reshape(axes(J, 4), 1, 1, 1, :), reshape(axes(J, 5), 1, 1, 1, 1, :))
+# The index arrays of a broadcast over the dimensions of `A`: one per dimension, shaped to vary
+# along that dimension only.
+_broadcast_axes(A) = ntuple(d -> reshape(axes(A, d), ntuple(e -> e == d ? size(A, d) : 1, Val(ndims(A)))),
+    Val(ndims(A)))
 
 """
     attach_greens_to_vertex!(J, Gm, X, Gp) -> J
@@ -84,7 +85,7 @@ contour: `J^{c1c2} = Σ_ab Gm^{c1 a} X^{ab} Gp^{b c2}` with the contour pair of 
 matrix.
 """
 function attach_greens_to_vertex!(J, Gm, X, Gp)
-    J .= _attach_greens_term.(Ref(Gm), Ref(X), Ref(Gp), _vertex_broadcast_indices(J)...)
+    J .= _attach_greens_term.(Ref(Gm), Ref(X), Ref(Gp), _broadcast_axes(J)...)
 end
 
 """
@@ -94,7 +95,7 @@ The bare vertex dressed by the propagators, `J0^{c1c2,c0} = Gm^{c1 c0} v_i Gp^{c
 band velocities `v[cart, i]`. The bare vertex is `V^{c1c2,c0} = δ_{c1c2} δ_{c1c0} v_i`.
 """
 function attach_greens_to_bare_vertex!(J0, Gm, v, Gp)
-    J0 .= _attach_greens_bare_term.(Ref(Gm), Ref(v), Ref(Gp), _vertex_broadcast_indices(J0)...)
+    J0 .= _attach_greens_bare_term.(Ref(Gm), Ref(v), Ref(Gp), _broadcast_axes(J0)...)
 end
 
 """
@@ -143,46 +144,89 @@ end
 # zero beyond it) sits on a multiple of h, where the regrouping is exact only for the two-sided
 # limit that the closed table value is.
 
+# The largest deviation of a node of `ωs` from the lattice `ωs[1] + h ℤ`, in units of `h`, and the
+# index of that node.
+function _lattice_deviation(ωs, h)
+    p = (ωs .- ωs[1]) ./ h
+    findmax(abs.(p .- round.(p)))
+end
+
+# The smallest k in 1, ..., 64 for which `ωs` lies on `ωs[1] + (h / k) ℤ` to `1e-8 h / k`, or `nothing`.
+function _lattice_divisor(ωs, h)
+    for k in 1:64
+        first(_lattice_deviation(ωs, h / k)) <= 1e-8 && return k
+    end
+    nothing
+end
+
+# The error for a grid that is not commensurate with the step `h`: the node farthest off the
+# lattice, and the largest compatible step `h / k` if there is one.
+function _commensurability_error(ωs, h)
+    deviation, j = _lattice_deviation(ωs, h)
+    k = _lattice_divisor(ωs, h)
+    advice = k === nothing ?
+        "No step dω_shift / k with k <= 64 makes ωs commensurate; build ωs with " *
+        "`graded_frequency_grid`, or move the node onto the lattice." :
+        "dω_shift = $(h / k) (= dω_shift / $k) is compatible; the cost of the " *
+        "ladder grows by a factor $k."
+    ArgumentError("ωs is not commensurate with dω_shift = $h: the node ωs[$j] = $(ωs[j]) is " *
+        "$deviation dω_shift off the lattice ωs[1] + dω_shift ℤ. " * advice)
+end
+
 """
     check_frequency_grid_commensurate(ωs, dω_shift) -> nothing
 
 Throw an `ArgumentError` unless every node of `ωs` lies on `ωs[1] + dω_shift ℤ` to `1e-8 dω_shift`,
-which the shift tables of the ladder require. The message names the largest step `dω_shift / k`
-(k = 2, ..., 64) on which `ωs` is commensurate and the factor `k` by which the cost grows, or says
-that none exists.
+which the shift tables of the ladder require. The message names the node farthest off the lattice and
+the largest step `dω_shift / k` (k = 2, ..., 64) on which `ωs` is commensurate with the factor `k` by
+which the cost grows, or says that none exists.
 """
 function check_frequency_grid_commensurate(ωs, dω_shift)
-    deviation(h) = maximum(abs, (ωs .- ωs[1]) ./ h .- round.((ωs .- ωs[1]) ./ h))
-    deviation(dω_shift) <= 1e-8 && return nothing
-    divisor = findfirst(k -> deviation(dω_shift / k) <= 1e-8, 2:64)
-    k = divisor === nothing ? nothing : (2:64)[divisor]
-    advice = k === nothing ?
-        "No step dω_shift / k with k <= 64 makes ωs commensurate; use a different ωs." :
-        "dω_shift = $(dω_shift / k) (= dω_shift / $k) is compatible; the cost of the " *
-        "ladder grows by a factor $k."
-    throw(ArgumentError("ωs is not commensurate with dω_shift = $dω_shift (the largest deviation " *
-        "of a node from the lattice ωs[1] + dω_shift ℤ is $(deviation(dω_shift)) dω_shift). " * advice))
+    first(_lattice_deviation(ωs, dω_shift)) <= 1e-8 || throw(_commensurability_error(ωs, dω_shift))
+    nothing
 end
 
 """
-    vertex_shift_tables(ωs, dω_shift, M) -> (; klo, wlo, whi)
+    ladder_shift_step(ωs, dω_shift; verbosity = 0) -> dω_shift
+
+The step of the shift tables of the ladder. An explicit `dω_shift` is checked with
+[`check_frequency_grid_commensurate`](@ref) and returned. `dω_shift = nothing` derives the largest
+step on which `ωs` is commensurate, `minimum(diff(ωs)) / k` with the smallest k <= 64, and logs `k`
+at `verbosity > 0` if it is not 1, since the cost grows by that factor. Throws an `ArgumentError`
+if there is no such step.
+"""
+function ladder_shift_step(ωs, dω_shift; verbosity = 0)
+    if dω_shift !== nothing
+        check_frequency_grid_commensurate(ωs, dω_shift)
+        return dω_shift
+    end
+    h = minimum(diff(ωs))
+    k = _lattice_divisor(ωs, h)
+    k === nothing && throw(_commensurability_error(ωs, h))
+    k > 1 && verbosity > 0 && @info "ladder: shift step dω_shift = $(h / k) (the minimum step of ωs / $k); " *
+        "the cost grows by a factor $k"
+    h / k
+end
+
+"""
+    vertex_shift_tables(ωs, dω_shift, nshift) -> (; klo, wlo, whi)
 
 The hat-basis shift tables of the ladder. For the sign `s = 1` (shift up) and `s = 2` (shift down),
-`m = 1:M+1` (shift by `(m - 1) dω_shift`) and a node `j`, the shifted vertex is
+`m = 1:nshift` (shift by `(m - 1) dω_shift`) and a node `j`, the shifted vertex is
 `(S J)(ωs[j]) = wlo[j, m, s] J[klo[j, m, s]] + whi[j, m, s] J[klo[j, m, s] + 1]` for a vertex `J`
 sampled on `ωs`, the linear interpolant in the cell of `ωs[j] ± (m - 1) dω_shift`. Both weights
 are zero if that point lies outside `[ωs[1], ωs[end]]` (to `1e-8 dω_shift`). The (1 - r, r)
 regrouping of two tables spreads a nonzero end value of the vertex over one shift step beyond the
 grid (see the comment above `check_frequency_grid_commensurate`).
 """
-function vertex_shift_tables(ωs, dω_shift, M)
+function vertex_shift_tables(ωs, dω_shift, nshift)
     FT = eltype(ωs)
     nω = length(ωs)
     tol = FT(1e-8) * dω_shift
-    klo = Array{Int32}(undef, nω, M + 1, 2)
-    wlo = Array{FT}(undef, nω, M + 1, 2)
-    whi = Array{FT}(undef, nω, M + 1, 2)
-    for (s, sign) in enumerate((1, -1)), m in 1:M+1, j in 1:nω
+    klo = Array{Int32}(undef, nω, nshift, 2)
+    wlo = Array{FT}(undef, nω, nshift, 2)
+    whi = Array{FT}(undef, nω, nshift, 2)
+    for (s, sign) in enumerate((1, -1)), m in 1:nshift, j in 1:nω
         x = ωs[j] + sign * (m - 1) * dω_shift
         # The cell of x (clamped, so that a node hit by round-off lies in the end cell).
         k = clamp(searchsortedlast(ωs, x), 1, nω - 1)
@@ -225,7 +269,7 @@ end
 """
     bin_coupling_on_shift_grid!(B, g2, fidx, ωq, nB, w_f, dω_shift, ω_acoustic) -> B
 
-Fill `B[m, f, i, type]` (`m = 1:M+1`, shift `(m - 1) dω_shift`) of one chunk of inner states:
+Fill `B[m, f, i, type]` (`m = 1:nshift`, shift `(m - 1) dω_shift`) of one chunk of inner states:
 `B[m, f, i, 1] = w_f[f] Σ_ν g2[ν, i, fidx[f]] tent(ωq[ν, f, i] / dω_shift - (m - 1))` and the same
 with a factor `nB[ν, f, i]` for `type = 2`, over the modes with `ωq >= ω_acoustic`.
 `tent(x) = max(0, 1 - |x|)` is the linear split of a frequency onto its two neighbouring shifts.
@@ -261,8 +305,7 @@ inner state at chunk position `f`) and the star boundaries `star_ptr` (the star 
 positions `star_ptr[ip]:star_ptr[ip + 1] - 1`).
 """
 function star_sum_coupling!(Bt, B, R, fidx, star_ptr)
-    index(n, dim) = reshape(1:n, ntuple(d -> d == dim ? n : 1, 6))
-    m, b, _, a, i, type = (index(size(Bt, d), d) for d in 1:6)
+    m, b, _, a, i, type = _broadcast_axes(Bt)
     _threaded_on_host(Bt, axes(Bt, 3)) do ips
         view(Bt, :, :, ips, :, :, :) .= _star_sum_coupling_term.(Ref(B), Ref(R), Ref(fidx), Ref(star_ptr),
             m, b, reshape(ips, 1, 1, :, 1, 1, 1), a, i, type)
@@ -283,11 +326,10 @@ end
 
 Fill `X[j, c12, c0, ri, m, b, ip] = (S_m J_{i1 - 1 + ip})^b[j]` (`ri` = real, imaginary part) for
 the vertex `J[ω, c12, cart, c0, i]`, the outer states `i1:i1 + size(X, 7) - 1` and the shift tables
-of one sign: `klo`, `wlo`, `whi` of size `(nω, M + 1)` ([`vertex_shift_tables`](@ref)).
+of one sign: `klo`, `wlo`, `whi` of size `(nω, nshift)` ([`vertex_shift_tables`](@ref)).
 """
 function gather_shifted_vertex!(X, J, klo, wlo, whi, i1)
-    index(n, dim) = reshape(1:n, ntuple(d -> d == dim ? n : 1, 7))
-    j, c12, c0, ri, m, b, ip = (index(size(X, d), d) for d in 1:7)
+    j, c12, c0, ri, m, b, _ = _broadcast_axes(X)
     _threaded_on_host(X, axes(X, 7)) do ips
         view(X, :, :, :, :, :, :, ips) .= _shifted_vertex_term.(Ref(J), Ref(klo), Ref(wlo),
             Ref(whi), i1, j, c12, c0, ri, m, b, reshape(ips, 1, 1, 1, 1, 1, 1, :))
@@ -326,5 +368,5 @@ and `KY` are real work arrays of size `(nω, 4, 2, 2, 3, ni)`.
 function apply_phonon_exchange_kernel!(KJ, Cp, Cm, KK, Y, KY)
     Y .= (view(Cp, :, :, :, :, :, :, 1) .- view(Cm, :, :, :, :, :, :, 1)) ./ 2
     mul!(reshape(KY, size(KY, 1), :), KK, reshape(Y, size(Y, 1), :))
-    KJ .= _apply_phonon_exchange_kernel_term.(Ref(Cp), Ref(Cm), Ref(KY), _vertex_broadcast_indices(KJ)...)
+    KJ .= _apply_phonon_exchange_kernel_term.(Ref(Cp), Ref(Cm), Ref(KY), _broadcast_axes(KJ)...)
 end

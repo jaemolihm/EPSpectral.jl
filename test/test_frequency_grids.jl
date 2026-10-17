@@ -92,4 +92,25 @@
             @test err <= 1e-13 * maximum(abs, Σin)
         end
     end
+
+    @testset "graded_frequency_grid" begin
+        # 1 meV cells within 0.1 eV and 20 meV cells to 0.34 eV: the SrVO3 grid, symmetric, with
+        # the outermost node the largest multiple of 20 meV not beyond 0.35.
+        grid = graded_frequency_grid(0.5, (0.001, 0.02), (0.1, 0.35))
+        @test length(grid) == 201 + 2 * 12 && grid[1] ≈ 0.5 - 0.34 && grid[end] ≈ 0.5 + 0.34
+        @test grid ≈ 1.0 .- reverse(grid) && issorted(grid)
+        @test minimum(diff(grid)) ≈ 0.001 && maximum(diff(grid)) ≈ 0.02
+        # The grid is commensurate with the finest step by construction, so the ladder derives it.
+        @test EPSpectral.ladder_shift_step(grid, nothing) ≈ 0.001
+        # Three regions whose transitions (0.05, 0.3) are not multiples of the next step: the nodes
+        # stay on center + steps[1] p.
+        grid3 = graded_frequency_grid(0.0, (0.01, 0.03, 0.09), (0.05, 0.3, 0.9))
+        @test all(p -> abs(p - round(p)) < 1e-8, grid3 ./ 0.01)
+        @test EPSpectral.ladder_shift_step(grid3, nothing) ≈ 0.01
+        @test grid3[end] ≈ 0.9 && 0.05 in grid3
+        # A ratio that is not an integer, unordered widths and mismatched lengths error.
+        @test_throws ArgumentError graded_frequency_grid(0.0, (0.01, 0.025), (0.1, 0.3))
+        @test_throws ArgumentError graded_frequency_grid(0.0, (0.01, 0.02), (0.3, 0.1))
+        @test_throws ArgumentError graded_frequency_grid(0.0, (0.01, 0.02), (0.1,))
+    end
 end

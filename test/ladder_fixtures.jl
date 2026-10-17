@@ -3,12 +3,12 @@
 
 # `run_scgd0` result `res` and the ladder setup for `model`; `symmetry` is the one the ladder uses
 # (the scGD0 run uses it too).
-function ladder_case(model, nk, window, occ, ωs, res; symmetry, dω_shift = minimum(diff(ωs)))
+function ladder_case(model, nk, window, occ, ωs, res; symmetry, dω_shift = nothing)
     backend = EP.CPUBackend()
     setup = EPSpectral._setup_scgd0(model, nk, window, occ; ωs, dω_dense = minimum(diff(ωs)),
         backend, symmetry, verbosity = 0, electron_degen_cutoff = EP.electron_degen_cutoff)
     ladder = EPSpectral._setup_ladder(setup, res, symmetry; dω_shift, backend)
-    (; model, nk, window, occ, ωs, res, setup, ladder, symmetry, dω_shift)
+    (; model, nk, window, occ, ωs, res, setup, ladder, symmetry, ladder.dω_shift)
 end
 
 function holstein_ladder_case(; nk = 16, ω0 = 0.173, t = 1.0, λ = 0.5, symmetry = :model,

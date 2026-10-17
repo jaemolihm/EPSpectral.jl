@@ -49,7 +49,8 @@ returned, unconverged ones flagged.
 Keywords:
 - `occ`: `ElectronOccupationParams` with `occ_type = :FermiDirac`. `occ.μlist`, if given, is the
   starting μ; otherwise μ starts from the bare window bands. `occ` is not modified.
-- `ωs`: output grid, strictly increasing. `dω_dense = minimum(diff(ωs))` is the step of
+- `ωs`: output grid, strictly increasing ([`graded_frequency_grid`](@ref) builds a graded one that
+  `run_scgd0_ladder` accepts). `dω_dense = minimum(diff(ωs))` is the step of
   `ωs_dense = range(extrema(ωs)...; step = dω_dense)`, the grid of the spectral functions A_i(ω)
   that give μ and `min_i ∫A_i`, with Σ linearly interpolated onto it.
 - `η_min = 0` (scalar or per temperature), `η_init = 5 meV`: Σ starts from `-im * η_init`, so

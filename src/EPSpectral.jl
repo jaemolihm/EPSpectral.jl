@@ -10,7 +10,7 @@ using Roots: find_zero
 # EP names are imported one by one: EP exports `occ_fermion` / `occ_boson`, which must not shadow
 # the device-compilable local copies in `utils.jl`.
 using ElectronPhonon: ElectronPhonon, Model, BandStates, ElectronOccupationParams, CPUBackend,
-    alloc, to_device, to_device_copy, unit_to_aru, filter_electron_states,
+    alloc, to_device, reshape_buffer_view, to_device_copy, unit_to_aru, filter_electron_states,
     unfold_band_states, find_unfolding_indices, run_eph_over_k_and_kq, gather_pair_table!,
     state_weights, chemical_potential_is_computed, compute_ncarrier, compute_ncarrier_hole
 
@@ -21,7 +21,7 @@ include("scgd0.jl")
 include("ladder_kernel.jl")
 include("ladder.jl")
 
-export run_scgd0, SCGD0Result, save_scgd0, load_scgd0, kramers_kronig
+export run_scgd0, SCGD0Result, save_scgd0, load_scgd0, kramers_kronig, graded_frequency_grid
 export run_scgd0_ladder, SCGD0LadderResult, save_scgd0_ladder, load_scgd0_ladder
 
 end

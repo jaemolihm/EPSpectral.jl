@@ -63,14 +63,35 @@ end
         @test err isa ArgumentError
         @test occursin("dω_shift = 0.01", err.msg) && occursin("factor 3", err.msg)
         # A grid with no compatible step.
-        err = try; EPSpectral.check_frequency_grid_commensurate([0.0, 1.0, 1.0 + sqrt(2) / 100], 1.0); catch e; e; end
+        ωs_none = [0.0, 1.0, 1.0 + sqrt(2) / 100]
+        err = try; EPSpectral.check_frequency_grid_commensurate(ωs_none, 1.0); catch e; e; end
         @test err isa ArgumentError && occursin("No step", err.msg)
+        # The message names the node farthest off the lattice and the grid builder.
+        @test occursin("ωs[3] = $(ωs_none[3])", err.msg) && occursin("graded_frequency_grid", err.msg)
+    end
+
+    @testset "derived shift step" begin
+        # The lattice is the minimum step divided by k: k = 1 for a grid whose steps divide
+        # their minimum, k = 2 for 0.05 and 0.02 steps (lattice 0.01, minimum step 0.02).
+        ωs = vcat(0.0:0.05:0.5, 0.52:0.02:0.8)
+        @test EPSpectral.ladder_shift_step(ωs, nothing) ≈ 0.01
+        ωs_uniform = collect(0.0:0.02:1.0)
+        @test EPSpectral.ladder_shift_step(ωs_uniform, nothing) === minimum(diff(ωs_uniform))
+        ωs_pb = vcat(-0.5:0.05:-0.1, -0.09:0.01:0.09, 0.1:0.05:0.5)
+        @test EPSpectral.ladder_shift_step(ωs_pb, nothing) ≈ 0.01
+        # An explicit step is checked and returned as given.
+        @test EPSpectral.ladder_shift_step(ωs, 0.005) == 0.005
+        @test_throws ArgumentError EPSpectral.ladder_shift_step(ωs, 0.03)
+        @test_throws ArgumentError EPSpectral.ladder_shift_step([0.0, 1.0, 1.0 + sqrt(2) / 100], nothing)
+        # k > 1 is logged with its cost factor.
+        @test_logs (:info, r"factor 2") EPSpectral.ladder_shift_step(ωs, nothing; verbosity = 1)
+        @test_logs EPSpectral.ladder_shift_step(ωs_uniform, nothing; verbosity = 1)
     end
 
     @testset "one regrouped shift against the direct interpolation" begin
         ωs = vcat(-1.0:0.1:-0.4, -0.35:0.05:0.35, 0.4:0.1:1.0)
-        h, M = 0.05, 12
-        (; klo, wlo, whi) = EPSpectral.vertex_shift_tables(ωs, h, M)
+        h, nshift = 0.05, 13
+        (; klo, wlo, whi) = EPSpectral.vertex_shift_tables(ωs, h, nshift)
         y0 = pseudorandom_complex(length(ωs); seed = 0.7)
         # y vanishes at the end nodes, where the regrouping is exact on the closed table values.
         y = copy(y0); y[1] = y[end] = 0
@@ -157,16 +178,38 @@ end
         (; model, nk, window, occ, res) = pb
         run(res; kwargs...) = run_scgd0_ladder(model, nk, window, res; occ, Ωs = [0.0],
             verbosity = 0, kwargs...)
-        # The coarse step 45 meV instead of 50 meV: ωs is not on a lattice of its minimum step.
-        ωs_bad = 11.83 * eV .+ vcat(-1.2:0.045:-0.25, -0.24:0.02:0.24, 0.25:0.045:1.2) .* eV
-        res_bad = EPSpectral.SCGD0Result(collect(ωs_bad),
-            fill(complex(0.0, -0.01), length(ωs_bad), res.el_i.n, length(res.Tlist)), res.μ,
+        with_ωs(ωs_new) = EPSpectral.SCGD0Result(collect(ωs_new),
+            fill(complex(0.0, -0.01), length(ωs_new), res.el_i.n, length(res.Tlist)), res.μ,
             res.el_i, res.Tlist, res.nlist, res.converged, res.history)
-        err = try; run(res_bad); catch e; e; end
-        @test err isa ArgumentError
-        @test occursin("not commensurate", err.msg) &&
-              (occursin("is compatible", err.msg) || occursin("No step", err.msg))
+        # The coarse step 45 meV with 20 meV cells and a 10 meV transition: the lattice is 5 meV, half
+        # the minimum step, which the derived default finds (twice the cost of the minimum step).
+        ωs_k2 = 11.83 * eV .+ vcat(-1.2:0.045:-0.25, -0.24:0.02:0.24, 0.25:0.045:1.2) .* eV
+        res_k2 = with_ωs(ωs_k2)
+        @test EPSpectral.ladder_shift_step(ωs_k2, nothing) ≈ 5e-3 * eV
+        out_k2 = run(res_k2)
+        @test out_k2.dω_shift ≈ 5e-3 * eV
+        # An explicit minimum step is not on the lattice: the error names the compatible step.
+        err = try; run(res_k2; dω_shift = 10e-3 * eV); catch e; e; end
+        @test err isa ArgumentError && occursin("is compatible", err.msg)
+        # A coarse step with no lattice at any k <= 64 is an error with or without an explicit step.
+        res_bad = with_ωs(11.83 * eV .+ vcat(-1.2:0.0452123:-0.25, -0.24:0.02:0.24, 0.25:0.0452123:1.2) .* eV)
+        for kwargs in ((;), (; dω_shift = 10e-3 * eV))
+            err = try; run(res_bad; kwargs...); catch e; e; end
+            @test err isa ArgumentError
+            @test occursin("not commensurate", err.msg) && occursin("No step", err.msg)
+        end
         @info "non-commensurate message" err.msg
+
+        # The derived default is the minimum step on a grid whose lattice it is, so it equals the
+        # explicit minimum step bitwise.
+        for case in (pb, holstein_ladder_case(; nk = 8))
+            run_case(res_case; kwargs...) = run_scgd0_ladder(case.model, case.nk, case.window, res_case;
+                case.occ, Ωs = [0.0], verbosity = 0, rtol = 1e-6, kwargs...)
+            derived = run_case(case.res)
+            explicit = run_case(case.res; dω_shift = minimum(diff(case.ωs)))
+            @test derived.dω_shift == minimum(diff(case.ωs))
+            @test derived.σ_ladder == explicit.σ_ladder && derived.niter == explicit.niter
+        end
 
         # The same hat-basis shifts on a table twice as fine: one application on a vertex that
         # vanishes at the end nodes is unchanged. A nonzero end value is spread over one table
