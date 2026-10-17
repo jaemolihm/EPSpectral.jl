@@ -2,7 +2,7 @@ module EPSpectral
 
 using LinearAlgebra: mul!
 using JLD2: jldopen
-using OhMyThreads: tforeach, tmap, index_chunks
+using OhMyThreads: tforeach, index_chunks
 using Roots: find_zero
 # EP names are imported one by one: EP exports `occ_fermion` / `occ_boson`, which must not shadow
 # the device-compilable local copies in `utils.jl`.
