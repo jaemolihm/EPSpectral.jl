@@ -56,7 +56,7 @@
         @test Y[1, :] == y[1, :] && Y[n_out, :] == y[end, :]
     end
 
-    @testset "cell_search_table, _self_energy_at" begin
+    @testset "cell_search_table, _interp_linear_grid" begin
         # The cell search finds the cell `searchsortedlast` does, so the lookup is bitwise the one
         # with a bisection, on the nodes and their neighbouring floats, outside both ends, at the
         # last node and at a NaN (the first value).
@@ -72,7 +72,7 @@
             Σin = pseudorandom_complex(length(ωs), 2; seed = 4)
             cell_table = EPSpectral.cell_search_table(EP.CPUBackend(), ωs)
             all(isequal(lookup_bisection(Σin, col, x, ωs),
-                        EPSpectral._self_energy_at(Σin, col, x, ωs, cell_table))
+                        EPSpectral._interp_linear_grid(Σin, col, x, ωs, cell_table))
                 for col in axes(Σin, 2), x in vcat(xs, nextfloat.(ωs), prevfloat.(ωs), NaN))
         end
         @test same_as_bisection(ωs, xs)
@@ -88,7 +88,7 @@
         cell_table = EPSpectral.cell_search_table(EP.CPUBackend(), ωs)
         for col in axes(Σin, 2)
             f = itp(Σin[:, col])
-            err = maximum(abs(EPSpectral._self_energy_at(Σin, col, x, ωs, cell_table) - f(x)) for x in xs)
+            err = maximum(abs(EPSpectral._interp_linear_grid(Σin, col, x, ωs, cell_table) - f(x)) for x in xs)
             @test err <= 1e-13 * maximum(abs, Σin)
         end
     end

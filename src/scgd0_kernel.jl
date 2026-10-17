@@ -28,8 +28,8 @@ give `Inf * 0 = NaN`.
         ω, g2, ωq, ε_f, i_f, Σin, ωs, ωs_cell_table, μ, T, w_f, ω_acoustic)
     ωq < ω_acoustic && return zero(g2)
     n_q = occ_boson(ωq, T)
-    Σ_abs = _self_energy_at(Σin, i_f, ω + ωq, ωs, ωs_cell_table)
-    Σ_emi = _self_energy_at(Σin, i_f, ω - ωq, ωs, ωs_cell_table)
+    Σ_abs = _interp_linear_grid(Σin, i_f, ω + ωq, ωs, ωs_cell_table)
+    Σ_emi = _interp_linear_grid(Σin, i_f, ω - ωq, ωs, ωs_cell_table)
     z_abs = ω + ωq - ε_f - Σ_abs
     z_emi = ω - ωq - ε_f - Σ_emi
     ImG_abs = -imag(z_abs) / abs2(z_abs)   # Im(1/z), without the scaled complex `inv`

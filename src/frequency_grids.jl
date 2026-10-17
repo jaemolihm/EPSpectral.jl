@@ -84,15 +84,15 @@ function linear_interpolation_table(ωs, xs)
 end
 
 """
-    apply_interpolation_table!(Y, Σ, j, t) -> Y
+    apply_interpolation_table!(Y, ys, j, t) -> Y
 
-Apply the table `(j, t)` of [`linear_interpolation_table`](@ref) to the columns of `Σ`:
-`Y[r, i] = (1 - t[r]) Σ[j[r], i] + t[r] Σ[j[r] + 1, i]`. A gather broadcast over backend arrays, so
-it runs on the host and on the device and is deterministic.
+Apply the table `(j, t)` of [`linear_interpolation_table`](@ref) to the columns of `ys`:
+`Y[r, i] = (1 - t[r]) ys[j[r], i] + t[r] ys[j[r] + 1, i]`. A gather broadcast over backend arrays,
+so it runs on the host and on the device and is deterministic.
 """
-function apply_interpolation_table!(Y, Σ, j, t)
-    lerp(Σ, jr, tr, i) = (1 - tr) * Σ[jr, i] + tr * Σ[jr + 1, i]
-    Y .= lerp.(Ref(Σ), j, t, reshape(axes(Y, 2), 1, :))
+function apply_interpolation_table!(Y, ys, j, t)
+    lerp(ys, jr, tr, i) = (1 - tr) * ys[jr, i] + tr * ys[jr + 1, i]
+    Y .= lerp.(Ref(ys), j, t, reshape(axes(Y, 2), 1, :))
 end
 
 """
@@ -122,25 +122,25 @@ function cell_search_table(backend, ωs)
 end
 
 """
-    _self_energy_at(Σin, col, x, ωs, ωs_cell_table)
+    _interp_linear_grid(ys, col, x, ωs, ωs_cell_table)
 
-Linear interpolation of column `col` of `Σin` (sampled on the sorted grid `ωs`, `size(Σin, 1) ==
+Linear interpolation of column `col` of `ys` (sampled on the sorted grid `ωs`, `size(ys, 1) ==
 length(ωs)`) at `x`, held flat outside the grid: `Gridded(Linear())` with `Flat()` extrapolation
 in Interpolations.jl. The cell is found from `ωs_cell_table = cell_search_table(backend, ωs)`
 (on the same backend as `ωs`): one table read and one comparison. Takes isbits values and arrays,
 neither allocates nor throws, so it can be called from a device broadcast.
 """
-@inline function _self_energy_at(Σin, col, x, ωs, ωs_cell_table)
+@inline function _interp_linear_grid(ys, col, x, ωs, ωs_cell_table)
     (; jtab, x0, inv_h) = ωs_cell_table
     n = length(ωs)
-    !(x > (@inbounds ωs[1])) && return @inbounds Σin[1, col]   # also a NaN x
-    x >= (@inbounds ωs[n]) && return @inbounds Σin[n, col]
+    !(x > (@inbounds ωs[1])) && return @inbounds ys[1, col]   # also a NaN x
+    x >= (@inbounds ωs[n]) && return @inbounds ys[n, col]
     # ωs[1] < x < ωs[n], so the bucket is in 0:bucket(ωs[n]) and j + 1 <= n.
     j = Int(@inbounds jtab[unsafe_trunc(Int, (x - x0) * inv_h) + 1])
     j += @inbounds ωs[j + 1] <= x
     @inbounds begin
         t = (x - ωs[j]) / (ωs[j + 1] - ωs[j])
-        (1 - t) * Σin[j, col] + t * Σin[j + 1, col]
+        (1 - t) * ys[j, col] + t * ys[j + 1, col]
     end
 end
 
