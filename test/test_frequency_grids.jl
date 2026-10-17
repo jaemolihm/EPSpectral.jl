@@ -3,8 +3,8 @@
     ωs = collect(vcat(-0.35:0.02:-0.11, -0.099:0.001:0.100, 0.12:0.02:0.34))
     ωs_dense = range(extrema(ωs)...; step = minimum(diff(ωs)))
 
-    @testset "kk_matrix" begin
-        K = EPSpectral.kk_matrix(ωs)
+    @testset "kramers_kronig_matrix" begin
+        K = EPSpectral.kramers_kronig_matrix(ωs)
         z = pseudorandom(length(ωs); seed = 1)
         # Export smoke test: `kramers_kronig` is defined as `K * z`.
         @test kramers_kronig(ωs, z) == K * z
@@ -35,7 +35,7 @@
             tot / π
         end
         y_ref = pv.(xg)
-        @test norm(EPSpectral.kk_matrix(xg) * zg - y_ref) <= 1e-8 * norm(y_ref)
+        @test norm(EPSpectral.kramers_kronig_matrix(xg) * zg - y_ref) <= 1e-8 * norm(y_ref)
     end
 
     # Targets beyond both ends of ωs, exactly on its nodes, and on the dense grid.
@@ -43,13 +43,13 @@
     xs = vcat(range(ωs[1] - 0.05, ωs[end] + 0.05; length = n_out), ωs, collect(ωs_dense))
     itp(y) = extrapolate(interpolate((ωs,), y, Gridded(Linear())), Flat())
 
-    @testset "interp_table, interp_apply!" begin
+    @testset "linear_interpolation_table, apply_interpolation_table!" begin
         y = pseudorandom_complex(length(ωs), 3; seed = 2)
-        j, t = EPSpectral.interp_table(ωs, xs)
+        j, t = EPSpectral.linear_interpolation_table(ωs, xs)
         @test j isa Vector{Int32} && t isa Vector{Float64}
         @test all(in(1:length(ωs) - 1), j) && all(x -> 0 <= x <= 1, t)
         Y = zeros(ComplexF64, length(xs), 3)
-        @test EPSpectral.interp_apply!(Y, y, j, t) === Y
+        @test EPSpectral.apply_interpolation_table!(Y, y, j, t) === Y
         Y_ref = stack(itp(y[:, i]).(xs) for i in 1:3)
         @test norm(Y - Y_ref) <= 1e-13 * norm(Y_ref)
         # Outside the grid the table returns the end values exactly.

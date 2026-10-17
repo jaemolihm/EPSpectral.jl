@@ -34,10 +34,10 @@
             ladder_dev = device_ladder(dω_shift)
             for gpu_tile in (nothing, 7)
                 # `gpu_tile` forces streaming, and the small g2 is resident otherwise.
-                work = EPSpectral._ladder_work(ladder_dev, gpu, gpu_tile, 0)
-                @test work.streamed == (gpu_tile !== nothing)
+                workspace = EPSpectral._ladder_workspace(ladder_dev, gpu, gpu_tile, 0)
+                @test workspace.streamed == (gpu_tile !== nothing)
                 # The solver's own device memory counts against the resident g2.
-                @test EPSpectral._ladder_work(ladder_dev, gpu, nothing, 0; solver_bytes = 10^15).streamed
+                @test EPSpectral._ladder_workspace(ladder_dev, gpu, nothing, 0; solver_bytes = 10^15).streamed
                 dev = run_loop(ladder_dev, gpu; gpu_tile)
                 @test dev.niter == host.niter && all(dev.converged)
                 @test rel(dev.σ_bubble, host.σ_bubble) <= 1e-10

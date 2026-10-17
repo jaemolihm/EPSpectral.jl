@@ -13,7 +13,7 @@
 function scgd0_v2_reference(el, g2, ωq, ωs, ωs_dense, occ, ηlist, η_init, niter, ω_acoustic)
     nω, n, nT, nmodes = length(ωs), el.n, length(occ), size(g2, 1)
     # Re Σ by the spline Kramers-Kronig map, as in the package.
-    K_re = EPSpectral.kk_matrix(ωs)
+    K_re = EPSpectral.kramers_kronig_matrix(ωs)
     occ_f(e, T) = 1 / (exp(e / T) + 1)
     occ_b(e, T) = 1 / expm1(e / T)
     on_dense(Σs) = [extrapolate(interpolate((ωs,), Σs[:, i, iT], Gridded(Linear())), Flat())(ω)

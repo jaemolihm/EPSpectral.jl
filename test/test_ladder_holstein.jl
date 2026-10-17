@@ -9,14 +9,14 @@
         for iT in 1:2, Ω in (0.0, 0.2)
             Gm, Gp = ladder_propagators(case, iT, Ω)
             J0 = zeros(ComplexF64, length(case.ωs), 4, 3, 2, res.el_i.n)
-            EPSpectral.bare_vertex_response!(J0, Gm, ladder.v, Gp)
+            EPSpectral.attach_greens_to_bare_vertex!(J0, Gm, ladder.v, Gp)
             LJ = apply_ladder_case(case, J0, iT, Ω)
             @test maximum(abs, LJ) <= 1e-12 * maximum(abs, J0)
             # A rotation without the sign of the time-reversed partners (the inner state -k
             # reached with +1 instead of -1) does not cancel.
             wrong = (; ladder..., R = abs.(ladder.R))
-            work = EPSpectral._ladder_work(wrong, EP.CPUBackend(), nothing, 0)
-            LJ_wrong = EPSpectral.apply_ladder!(similar(J0), J0, wrong, work, Gm, Gp, res.Tlist[iT];
+            workspace = EPSpectral._ladder_workspace(wrong, EP.CPUBackend(), nothing, 0)
+            LJ_wrong = EPSpectral.apply_ladder_kernel!(similar(J0), J0, wrong, workspace, Gm, Gp, res.Tlist[iT];
                 ω_acoustic = EP.omega_acoustic)
             @test maximum(abs, LJ_wrong) > 1e-3 * maximum(abs, J0)
         end

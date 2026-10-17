@@ -41,7 +41,7 @@
         for iT in 1:2, (iΩ, Ω) in enumerate(Ωs)
             Gm, Gp = ladder_propagators(pb, iT, Ω)
             J0 = zeros(ComplexF64, length(res.ωs), 4, 3, 2, res.el_i.n)
-            EPSpectral.bare_vertex_response!(J0, Gm, pb.ladder.v, Gp)
+            EPSpectral.attach_greens_to_bare_vertex!(J0, Gm, pb.ladder.v, Gp)
             J1 = J0 .+ apply_ladder_case(pb, J0, iT, Ω)
             @test norm(out.J[:, :, :, :, :, iΩ, iT] - J1) <= 1e-12 * norm(J1)
         end
@@ -51,7 +51,7 @@
         for iT in 1:2, (iΩ, Ω) in enumerate(Ωs)
             Gm, Gp = ladder_propagators(pb, iT, Ω)
             J0 = zeros(ComplexF64, length(res.ωs), 4, 3, 2, res.el_i.n)
-            EPSpectral.bare_vertex_response!(J0, Gm, pb.ladder.v, Gp)
+            EPSpectral.attach_greens_to_bare_vertex!(J0, Gm, pb.ladder.v, Gp)
             J = out.J[:, :, :, :, :, iΩ, iT]
             @test norm(J - J0 - apply_ladder_case(pb, J, iT, Ω)) <= 10 * rtol * norm(J0)
         end
