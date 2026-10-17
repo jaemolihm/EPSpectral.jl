@@ -44,6 +44,16 @@ function kk_matrix(ωs)
 end
 
 """
+    trapezoid_weights(ωs) -> Vector
+
+The node weights `Wω` of the trapezoid rule on the sorted grid `ωs`, `∫ y dω ≈ Σ_j Wω[j] y[j]`:
+half the distance between the neighbouring nodes, with half a cell at each end node, so that
+`sum(Wω) == ωs[end] - ωs[1]`.
+"""
+trapezoid_weights(ωs) =
+    [(ωs[min(j + 1, end)] - ωs[max(j - 1, 1)]) / 2 for j in eachindex(ωs)]
+
+"""
     interp_table(ωs, xs) -> (j::Vector{Int32}, t::Vector{eltype(ωs)})
 
 The table of linear interpolation from the sorted grid `ωs` to the points `xs`, held flat outside

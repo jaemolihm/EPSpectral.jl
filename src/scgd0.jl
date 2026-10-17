@@ -143,7 +143,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
     end
 
     # On a host backend `to_device` aliases the states' own arrays; the loop only reads them.
-    (; el_i, g2, ωph = to_device(backend, calc.ωph), iq_kk = to_device(backend, calc.iq_kk),
+    (; el_i, el_f, g2, ωph = to_device(backend, calc.ωph), iq_kk = to_device(backend, calc.iq_kk),
        iks_i = to_device(backend, el_i.iks), iks_f = to_device(backend, el_f.iks),
        ε_i = to_device(backend, el_i.es), w_i = to_device(backend, state_weights(el_i)),
        ε_f = to_device(backend, el_f.es), w_f = to_device(backend, state_weights(el_f)),
