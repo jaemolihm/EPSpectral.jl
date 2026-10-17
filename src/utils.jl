@@ -1,5 +1,5 @@
 # Fermi-Dirac and Bose-Einstein occupations, called inside the Fan-Migdal element function
-# (`fm_term`) that a broadcast reduction runs on the host and on the device.
+# (`_fan_migdal_imsigma_term`) that a broadcast reduction runs on the host and on the device.
 # ElectronPhonon exports functions of the same names, but its `occ_fermion` takes `occ_type` as a
 # runtime keyword, whose branch chain and string-interpolating `throw` do not compile in a device
 # kernel. These local copies are therefore not exported, and EPSpectral imports ElectronPhonon names

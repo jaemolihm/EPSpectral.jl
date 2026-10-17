@@ -96,7 +96,7 @@ function apply_interpolation_table!(Y, Σ, j, t)
 end
 
 """
-    bucket_table(backend, ωs) -> (; jtab::Vector{Int32}, x0, inv_h)
+    cell_search_table(backend, ωs) -> (; jtab::Vector{Int32}, x0, inv_h)
 
 The O(1) cell search table for the sorted grid `ωs`, with `jtab` placed on `backend`. The axis is
 cut into buckets of width `h < minimum(diff(ωs))` from `x0 = ωs[1]`, `bucket(x) = unsafe_trunc(Int,
@@ -106,7 +106,7 @@ nodes in earlier buckets, all of which lie below `x` because `bucket` is monoton
 The table has `(ωs[end] - ωs[1]) / h + 1` entries, 4 B each, which grows as the inverse of the
 finest cell; more than `2^24` entries (64 MiB) throws an `ArgumentError`.
 """
-function bucket_table(backend, ωs)
+function cell_search_table(backend, ωs)
     FT = eltype(ωs)
     x0 = first(ωs)
     h_min = minimum(diff(ωs))
@@ -122,16 +122,16 @@ function bucket_table(backend, ωs)
 end
 
 """
-    _interp_linear_grid(Σin, col, x, ωs, ωs_buckets)
+    _self_energy_at(Σin, col, x, ωs, ωs_cell_table)
 
 Linear interpolation of column `col` of `Σin` (sampled on the sorted grid `ωs`, `size(Σin, 1) ==
 length(ωs)`) at `x`, held flat outside the grid: `Gridded(Linear())` with `Flat()` extrapolation
-in Interpolations.jl. The cell is found from `ωs_buckets = bucket_table(backend, ωs)` (on the same
+in Interpolations.jl. The cell is found from `ωs_cell_table = cell_search_table(backend, ωs)` (on the same
 backend as `ωs`): one table read and one comparison. Takes isbits values and arrays, neither
 allocates nor throws, so it can be called from a device broadcast.
 """
-@inline function _interp_linear_grid(Σin, col, x, ωs, ωs_buckets)
-    (; jtab, x0, inv_h) = ωs_buckets
+@inline function _self_energy_at(Σin, col, x, ωs, ωs_cell_table)
+    (; jtab, x0, inv_h) = ωs_cell_table
     n = length(ωs)
     !(x > (@inbounds ωs[1])) && return @inbounds Σin[1, col]   # also a NaN x
     x >= (@inbounds ωs[n]) && return @inbounds Σin[n, col]

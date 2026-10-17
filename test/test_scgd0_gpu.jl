@@ -21,8 +21,8 @@
         # Covers g2 resident on the device and streamed from host RAM, and run-to-run
         # reproducibility of each. The setup's arrays go to the device; g2 stays on the host,
         # where the loop expects it.
-        on_device(name, value) = name == :ωs_buckets ?
-            EPSpectral.bucket_table(gpu, setup_host.ωs) :
+        on_device(name, value) = name == :ωs_cell_table ?
+            EPSpectral.cell_search_table(gpu, setup_host.ωs) :
             name in (:g2, :el_i, :multiplets) || !(value isa Array) ?
             value : EP.to_device(gpu, value)
         names = keys(setup_host)
