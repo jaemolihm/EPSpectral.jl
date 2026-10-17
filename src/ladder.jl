@@ -60,7 +60,7 @@ the norm of `J0`, at most `maxiter` iterations) or `solver = :fixed_point` (from
 last σ, flagged in `converged`, with one warning.
 
 Keywords as in [`run_scgd0`](@ref): `backend`, `symmetry`, `verbosity`, `gpu_tile` (inner states
-per chunk, rounded up to whole stars), `ω_acoustic`, `electron_degen_cutoff`; the others go to
+per chunk, rounded up to whole stars), `ω_acoustic` (must be positive), `electron_degen_cutoff`; the others go to
 `run_eph_over_k_and_kq`.
 """
 function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
@@ -75,6 +75,8 @@ function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
     (gpu_tile === nothing || gpu_tile >= 1) || throw(ArgumentError(
         "gpu_tile must be nothing or a positive number of inner states, got $gpu_tile"))
     isempty(Ωs) && throw(ArgumentError("Ωs must hold at least one probe frequency"))
+    ω_acoustic > 0 || throw(ArgumentError("ω_acoustic must be positive, got $ω_acoustic: the " *
+        "shift-grid coupling build has no row for a negative phonon frequency"))
     (length(occ.Tlist) == length(scgd0.Tlist) && occ.Tlist ≈ scgd0.Tlist) || throw(ArgumentError(
         "occ.Tlist = $(occ.Tlist) must equal the temperatures of scgd0, $(scgd0.Tlist)"))
 

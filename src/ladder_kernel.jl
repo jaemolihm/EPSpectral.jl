@@ -279,12 +279,15 @@ Fill `B[m, f, i, type]` (`m = 1:nshift`, shift `(m - 1) dω_shift`) of one chunk
 `B[m, f, i, 1] = w_f[f] Σ_ν g2[ν, i, fidx[f]] tent(ωq[ν, f, i] / dω_shift - (m - 1))` and the same
 with a factor `nB[ν, f, i]` for `type = 2`, over the modes with `ωq >= ω_acoustic`.
 `tent(x) = max(0, 1 - |x|)` is the linear split of a frequency onto its two neighbouring shifts.
-Each mode is added to those two shifts only, in ascending ν. No index is guarded: `ωq` never exceeds
-the largest phonon frequency, which sets `nshift`, so the last row of `B` receives at most the weight 0.
+Each mode is added to those two shifts only, in ascending ν. No index is guarded: `ω_acoustic` is
+positive, so no `ωq` used is negative, and `ωq` never exceeds the largest phonon frequency, which sets
+`nshift`, so the last row of `B` receives at most the weight 0.
 """
 function bin_coupling_on_shift_grid!(B, g2, fidx, ωq, nB, w_f, dω_shift, ω_acoustic)
     i = reshape(axes(B, 3), 1, :, 1)
     type = reshape(axes(B, 4), 1, 1, :)
+    # The sink of the side-effecting broadcast below: 1 / (8 nshift) of the size of B, so a per-call
+    # allocation from the pool costs nothing next to the fill of B.
     done = similar(B, Bool, size(B, 2), size(B, 3), size(B, 4))
     _threaded_on_host(B, axes(B, 2)) do fs
         fill!(view(B, :, fs, :, :), 0)
