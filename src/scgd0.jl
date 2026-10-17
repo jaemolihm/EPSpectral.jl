@@ -104,7 +104,9 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
         verbosity, electron_degen_cutoff, ep_kwargs...) where {FT}
     # Outer states on the irreducible BZ, inner states on the full BZ, coupling extracted once.
     # Each run diagonalizes on its own backend, so the electron gauge inside a multiplet is the
-    # backend's.
+    # backend's. The extraction decides whether its output fits the device from the free device
+    # memory, which an earlier call's pooled buffers hide until they are returned to the driver.
+    ElectronPhonon.reclaim_device_memory(backend)
     sel_i = filter_electron_states(nk, model, window; symmetry, backend)
     sel_i.n > 0 ||
         throw(ArgumentError("the window $window holds no electron state on the grid $nk"))

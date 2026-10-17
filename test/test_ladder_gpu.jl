@@ -76,4 +76,32 @@
         streamed = run_l(gpu; gpu_tile = 7)
         @test rel(streamed.σ_ladder, dev.σ_ladder) <= 1e-10
     end
+
+    @testset "residency of consecutive calls" begin
+        # A device of `budget` bytes, on which the memory CUDA.jl's pool holds counts as used. It
+        # fits the resident g2 of a fresh call (the ladder's 4 GB headroom with its 20% margin)
+        # but not that and the pooled buffers of a call before it, which a call must return to
+        # the driver before it decides, in the extraction as in the ladder.
+        budget = 5_000_000_000
+        @eval ElectronPhonon free_bytes(::GPUBackend) = max(0, $budget - $(CUDA.cached_memory)())
+        try
+            decisions = map(1:2) do _
+                # What a call before this one leaves behind: freed buffers that the pool keeps.
+                CUDA.unsafe_free!(CUDA.zeros(UInt8, budget + 10^8))
+                logs, _ = redirect_stdout(devnull) do
+                    Test.collect_test_logs() do
+                        run_scgd0_ladder(model, nk, window, res; occ, Ωs = Ωs[1:1], verbosity = 1,
+                            backend = gpu)
+                    end
+                end
+                messages = [string(log.message) for log in logs]
+                (; extraction_streamed = any(contains("falling back to per-batch"), messages),
+                   ladder_streamed = any(contains("streamed from host RAM"), messages))
+            end
+            @test decisions[1] == decisions[2] == (; extraction_streamed = false,
+                ladder_streamed = false)
+        finally
+            @eval ElectronPhonon free_bytes(::GPUBackend) = $(CUDA.free_memory)()
+        end
+    end
 end
