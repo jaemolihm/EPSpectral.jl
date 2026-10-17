@@ -52,7 +52,8 @@ again for the same `model`, `nk` and `window`, which must give the same states a
 `ωs[1] + dω_shift ℤ`); the cost grows as `1 / dω_shift`. `dω_shift = nothing` takes the largest such
 step, `minimum(diff(ωs)) / k` with the smallest `k <= 64` ([`ladder_shift_step`](@ref)); an explicit
 value is checked. [`graded_frequency_grid`](@ref) builds commensurate graded grids. `occ` supplies
-`spin_degeneracy` and `volume`, and its `Tlist` must equal `scgd0.Tlist`. The linear problem is solved for each `(T, Ω)` in turn by
+`spin_degeneracy` and `volume`, and its `Tlist` must equal `scgd0.Tlist`.
+The linear problem is solved for each `(T, Ω)` in turn by
 `solver = :gmres` (warm-started from the previous `Ω` at the same `T`; residual below `rtol` times
 the norm of `J0`, at most `maxiter` iterations) or `solver = :fixed_point` (from `J0`,
 `J ← J0 + L(J)` until the relative change of σ is below `rtol`). An unconverged solve returns its

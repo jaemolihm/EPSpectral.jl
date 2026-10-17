@@ -95,6 +95,19 @@ function apply_interpolation_table!(Y, Σ, j, t)
     Y .= lerp.(Ref(Σ), j, t, reshape(axes(Y, 2), 1, :))
 end
 
+# Throw an `ArgumentError` unless `ωs` has at least two nodes and its consecutive spacings all exceed
+# `1e-8 (ωs[end] - ωs[1])`; a smaller spacing is a duplicated node or a few-ulp pair, and the step
+# the ladder derives from it would size an enormous shift table.
+function _check_frequency_grid(ωs)
+    length(ωs) >= 2 || throw(ArgumentError("ωs must have at least two points"))
+    gaps = diff(ωs)
+    h, j = findmin(gaps)
+    h > 1e-8 * (last(ωs) - first(ωs)) || throw(ArgumentError("ωs must be strictly increasing " *
+        "with spacings above 1e-8 of its span; ωs[$j] = $(ωs[j]) and ωs[$(j + 1)] = $(ωs[j + 1]) " *
+        "are $h apart"))
+    nothing
+end
+
 """
     bucket_table(backend, ωs) -> (; jtab::Vector{Int32}, x0, inv_h)
 

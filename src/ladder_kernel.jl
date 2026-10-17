@@ -174,35 +174,34 @@ function _commensurability_error(ωs, h)
 end
 
 """
-    check_frequency_grid_commensurate(ωs, dω_shift) -> nothing
-
-Throw an `ArgumentError` unless every node of `ωs` lies on `ωs[1] + dω_shift ℤ` to `1e-8 dω_shift`,
-which the shift tables of the ladder require. The message names the node farthest off the lattice and
-the largest step `dω_shift / k` (k = 2, ..., 64) on which `ωs` is commensurate with the factor `k` by
-which the cost grows, or says that none exists.
-"""
-function check_frequency_grid_commensurate(ωs, dω_shift)
-    first(_lattice_deviation(ωs, dω_shift)) <= 1e-8 || throw(_commensurability_error(ωs, dω_shift))
-    nothing
-end
-
-"""
     ladder_shift_step(ωs, dω_shift; verbosity = 0) -> dω_shift
 
-The step of the shift tables of the ladder. An explicit `dω_shift` is checked with
-[`check_frequency_grid_commensurate`](@ref) and returned. `dω_shift = nothing` derives the largest
-step on which `ωs` is commensurate, `minimum(diff(ωs)) / k` with the smallest k <= 64, and logs `k`
-at `verbosity > 0` if it is not 1, since the cost grows by that factor. Throws an `ArgumentError`
-if there is no such step.
+The step of the shift tables of the ladder, on which every node of `ωs` lies on `ωs[1] + dω_shift ℤ`
+to `1e-8 dω_shift`. An explicit `dω_shift` is checked and returned. `dω_shift = nothing` derives the
+largest such step, `minimum(diff(ωs)) / k` with the smallest k <= 64, and logs `k` at `verbosity > 0`
+if it is not 1, since the cost grows by that factor. If `minimum(diff(ωs))` is off the lattice by
+accumulated round-off (a fine step far from zero), the step is refined to `span / round(span / h)`.
+Throws an `ArgumentError` naming the node farthest off the lattice and the largest compatible step
+`dω_shift / k`, if there is one, when `ωs` is not commensurate; and for a duplicated or few-ulp node
+pair (spacing below `1e-8` of the span).
 """
 function ladder_shift_step(ωs, dω_shift; verbosity = 0)
+    _check_frequency_grid(ωs)
     if dω_shift !== nothing
-        check_frequency_grid_commensurate(ωs, dω_shift)
+        first(_lattice_deviation(ωs, dω_shift)) <= 1e-8 || throw(_commensurability_error(ωs, dω_shift))
         return dω_shift
     end
     h = minimum(diff(ωs))
     k = _lattice_divisor(ωs, h)
-    k === nothing && throw(_commensurability_error(ωs, h))
+    if k === nothing
+        # The smallest spacing is biased low by round-off in the nodes, which accumulates over the
+        # cells; refine the step from the whole span.
+        span = last(ωs) - first(ωs)
+        h_refined = span / round(span / h)
+        k = _lattice_divisor(ωs, h_refined)
+        k === nothing && throw(_commensurability_error(ωs, h))
+        h = h_refined
+    end
     k > 1 && verbosity > 0 && @info "ladder: shift step dω_shift = $(h / k) (the minimum step of ωs / $k); " *
         "the cost grows by a factor $k"
     h / k
@@ -217,7 +216,7 @@ The hat-basis shift tables of the ladder. For the sign `s = 1` (shift up) and `s
 sampled on `ωs`, the linear interpolant in the cell of `ωs[j] ± (m - 1) dω_shift`. Both weights
 are zero if that point lies outside `[ωs[1], ωs[end]]` (to `1e-8 dω_shift`). The (1 - r, r)
 regrouping of two tables spreads a nonzero end value of the vertex over one shift step beyond the
-grid (see the comment above `check_frequency_grid_commensurate`).
+grid (see the comment above `_lattice_deviation`).
 """
 function vertex_shift_tables(ωs, dω_shift, nshift)
     FT = eltype(ωs)

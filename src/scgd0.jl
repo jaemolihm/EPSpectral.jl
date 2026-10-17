@@ -78,8 +78,7 @@ function run_scgd0(model::Model{FT}, nk, window; occ::ElectronOccupationParams, 
         "run_scgd0 uses the Fermi-Dirac occupation only, got occ.occ_type = $(occ.occ_type)"))
     occ.type ∈ (:Metal, :Semiconductor) || throw(ArgumentError(
         "occ.type must be :Metal or :Semiconductor, got $(occ.type)"))
-    (length(ωs) >= 2 && all(>(0), diff(ωs))) || throw(ArgumentError(
-        "ωs must be strictly increasing with at least two points"))
+    _check_frequency_grid(ωs)
     fix_μ && !chemical_potential_is_computed(occ) && throw(ArgumentError(
         "fix_μ = true keeps μ at occ.μlist, which is not given"))
     η_min = η_min isa Number ? fill(FT(η_min), length(occ)) : collect(FT, η_min)
