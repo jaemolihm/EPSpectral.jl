@@ -3,6 +3,8 @@
 # loops on the full BZ (`compute_self_energy!`, `get_interpolated_self_energy`,
 # `compute_occupation!`, `update_chemical_potential!` of `ab_initio_solver_new.jl`): no symmetry,
 # f -> i the identity, no multiplet average, Interpolations and Roots as the old code used them.
+# Unlike v2, the Fan-Migdal input is read on ωs (Gridded linear, flat outside); only the spectral
+# weight uses the dense grid ωs_dense.
 # Its inputs (states, g2, ωq, nstates_base) come from its own `G2Calculator` run with
 # `symmetry = nothing`, the per-pair ωq read off that run's phonon table by a plain loop; nothing is
 # shared with the run under test.
@@ -19,13 +21,12 @@ function scgd0_v2_reference(el, g2, ωq, ωs, ωs_dense, occ, ηlist, η_init, n
     Σs = fill(complex(0.0, -η_init), nω, n, nT)
     μlist = copy(occ.μlist)
     for _ in 1:niter
-        Σs_input = on_dense(Σs)
         Σs_new = zeros(ComplexF64, nω, n, nT)
         for iT in 1:nT, f in 1:n
             T, μ = occ.Tlist[iT], μlist[iT]
-            Σ_f = Σs_input[:, f, iT]
+            Σ_f = Σs[:, f, iT]
             Σ_clamped = @. complex(real(Σ_f), min(imag(Σ_f), -ηlist[iT]))
-            Σ_itp = extrapolate(scale(interpolate(Σ_clamped, BSpline(Linear())), ωs_dense), Flat())
+            Σ_itp = extrapolate(interpolate((ωs,), Σ_clamped, Gridded(Linear())), Flat())
             ekq, wkq = el.es[f], el.weights[f]
             for i in 1:n, ν in 1:nmodes
                 ω_q = ωq[ν, i, f]

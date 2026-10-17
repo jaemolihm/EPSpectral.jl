@@ -4,8 +4,8 @@
 # that does not change between iterations) + `_loop_scgd0` (the temperature-dependent iteration).
 #
 # Index legend: ω = output frequency (`ωs`, any sorted grid), ωd = dense uniform frequency
-# (`ωs_dense`), ν = phonon mode, i = outer state (irreducible BZ, in the window), f = inner state
-# (full BZ, in the window), T = temperature (`occ.Tlist`).
+# (`ωs_dense`, for the spectral quadrature only), ν = phonon mode, i = outer state (irreducible BZ,
+# in the window), f = inner state (full BZ, in the window), T = temperature (`occ.Tlist`).
 
 """
     SCGD0Result
@@ -39,17 +39,19 @@ chemical potential μ, for the electron states in the energy `window` on the `nk
 states reduced to the irreducible BZ by `symmetry`), at every temperature of `occ`.
 
 Each iteration computes Im Σ at the current μ from the Fan-Migdal sum over the window states, with
-the input Σ linearly interpolated onto a uniform dense grid `ωs_dense` and clamped to
-`Im Σ <= -η_min`; Re Σ by the spline Kramers-Kronig map [`kramers_kronig`](@ref); averages Σ over
-degenerate multiplets (`electron_degen_cutoff`); and then re-solves μ from the spectral functions
-of the unclamped Σ for the carrier count `occ.nlist + occ.nelec`. A temperature stops iterating once
-`max_{ω,i} |ΔΣ| < tol`; at `maxiter` the last Σ and μ are returned, unconverged ones flagged.
+the input Σ clamped to `Im Σ <= -η_min` and read at ω ± ωq by linear interpolation on `ωs`; Re Σ by
+the spline Kramers-Kronig map [`kramers_kronig`](@ref); averages Σ over degenerate multiplets
+(`electron_degen_cutoff`); and then re-solves μ from the spectral functions of the unclamped Σ,
+integrated on a uniform dense grid `ωs_dense`, for the carrier count `occ.nlist + occ.nelec`. A
+temperature stops iterating once `max_{ω,i} |ΔΣ| < tol`; at `maxiter` the last Σ and μ are
+returned, unconverged ones flagged.
 
 Keywords:
 - `occ`: `ElectronOccupationParams` with `occ_type = :FermiDirac`. `occ.μlist`, if given, is the
   starting μ; otherwise μ starts from the bare window bands. `occ` is not modified.
 - `ωs`: output grid, strictly increasing. `dω_dense = minimum(diff(ωs))` is the step of
-  `ωs_dense = range(extrema(ωs)...; step = dω_dense)`.
+  `ωs_dense = range(extrema(ωs)...; step = dω_dense)`, the grid of the spectral functions A_i(ω)
+  that give μ and `min_i ∫A_i`, with Σ linearly interpolated onto it.
 - `η_min = 0` (scalar or per temperature), `η_init = 5 meV`: Σ starts from `-im * η_init`, so
   `maxiter = 1` is the one-shot G0D0.
 - `maxiter = 20`, `tol = 0.05 meV`.
@@ -131,6 +133,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
     length(group) > 1 && push!(multiplets, group)
 
     ωs_dense = range(extrema(ωs)...; step = dω_dense)
+    j_dense, t_dense = interp_table(ωs, ωs_dense)
 
     # Starting μ: given, or from the bare window bands on a copy, so `occ` is not modified.
     μ_start = if chemical_potential_is_computed(occ)
@@ -147,8 +150,8 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
        f_to_i = to_device(backend, f_to_i), W = sum(state_weights(el_i)),
        nstates_base = el_i.nstates_base, multiplets,
        ωs = to_device(backend, collect(FT, ωs)), ωs_dense,
-       K = to_device(backend, kk_matrix(ωs)), P = to_device(backend, interp_matrix(ωs, ωs_dense)),
-       μ_start)
+       j_dense = to_device(backend, j_dense), t_dense = to_device(backend, t_dense),
+       K = to_device(backend, kk_matrix(ωs)), μ_start)
 end
 
 # The scGD0 iteration on `setup` (see `_setup_scgd0`; the fields read here can also be built by
@@ -157,11 +160,11 @@ end
 function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, Σ_init, fix_μ,
         ω_acoustic, verbosity)
     (; g2, ωph, iq_kk, iks_i, iks_f, ε_i, w_i, ε_f, w_f, f_to_i, W, nstates_base, multiplets, ωs,
-       ωs_dense, K, P) = setup
+       ωs_dense, j_dense, t_dense, K) = setup
     FT = eltype(g2)
     nm, ni, nf = size(g2)
     nω, nωd, nT = length(ωs), length(ωs_dense), length(occ)
-    ωd0, dωd = first(ωs_dense), step(ωs_dense)
+    dωd = step(ωs_dense)
     bracket = extrema(ωs_dense) .+ (-FT(0.1), FT(0.1))   # μ search interval (Ry)
 
     # One partition of the inner states for every iteration, for both residencies: chunks of at
@@ -179,8 +182,8 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
         Σ = to_device_copy(backend, Σ_init)
     end
     Σ_new = copy(Σ)
-    Σd = alloc(backend, Complex{FT}, nωd, ni)          # P·Σ of one temperature
-    Σin = alloc(backend, Complex{FT}, nωd, ni, nT)     # clamped P·Σ, the Fan-Migdal input
+    Σd = alloc(backend, Complex{FT}, nωd, ni)          # Σ of one temperature on ωs_dense
+    Σin = alloc(backend, Complex{FT}, nω, ni, nT)      # clamped Σ, the Fan-Migdal input
     ImΣ = alloc(backend, FT, nω, ni, nT)
     ReΣ = alloc(backend, FT, nω, ni)
     A = alloc(backend, FT, nωd, ni)                    # spectral functions A_i(ωd)
@@ -221,10 +224,10 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
         t0 = time()
         iTs = findall(active)
 
-        # 1. Input self-energy on the dense grid, clamped to Im Σ <= -η_min.
+        # 1. Input self-energy, clamped to Im Σ <= -η_min.
         for iT in iTs
-            mul!(Σd, P, view(Σ, :, :, iT))
-            view(Σin, :, :, iT) .= complex.(real.(Σd), min.(imag.(Σd), -η_min[iT]))
+            Σ_T = view(Σ, :, :, iT)
+            view(Σin, :, :, iT) .= complex.(real.(Σ_T), min.(imag.(Σ_T), -η_min[iT]))
         end
         # 2-3. Im Σ: the Fan-Migdal sum, f-chunks outside so a chunk's ωq is gathered and its
         # g2 permuted to (ν, f, i) once.
@@ -249,7 +252,7 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
             for iT in iTs
                 fm_imsigma_tile!(ImΣ[:, :, iT], reshape(g2_t, nνf, ni),
                     reshape(ωq_t, nνf, ni), ωs, ε_νf[νfs], f_to_i_νf[νfs],
-                    Σin[:, :, iT], ωd0, dωd, μ[iT], occ.Tlist[iT], w_νf[νfs],
+                    Σin[:, :, iT], μ[iT], occ.Tlist[iT], w_νf[νfs],
                     ω_acoustic)
             end
         end
@@ -268,8 +271,8 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
         end
         for iT in iTs
             Σ_new_T = view(Σ_new, :, :, iT)
-            # 6. Spectral DOS from the unclamped Σ.
-            mul!(Σd, P, Σ_new_T)
+            # 6. Spectral DOS from the unclamped Σ, on the dense grid.
+            interp_apply!(Σd, Σ_new_T, j_dense, t_dense)
             A .= .-imag.(inv.(ωs_dense .- transpose(ε_i) .- Σd)) ./ π
             mul!(D, A, w_i, dωd, 0)
             hist_minA[iT, iter] = minimum(sum(A; dims = 1)) * dωd

@@ -1,7 +1,7 @@
 # The Fan-Migdal sum of the scGD0 iteration and the phonon-frequency gather that feeds it.
 #
 # Index legend: ω = output frequency (`ωs`), ν = phonon mode, i = outer (IBZ) state, f = inner
-# (full-BZ) state, ωd = dense uniform frequency (`ωs_dense`).
+# (full-BZ) state.
 #
 # Both are broadcasts over backend arrays with a scalar element function, so the same code runs on
 # the host and on the device; there is no custom kernel. The element functions take scalars and
@@ -9,24 +9,25 @@
 # allocate nor throw.
 
 """
-    fm_term(ω, g2, ωq, ε_f, i_f, Σin, ωd0, dωd, μ, T, w_f, ω_acoustic)
+    fm_term(ω, g2, ωq, ε_f, i_f, Σin, ωs, μ, T, w_f, ω_acoustic)
 
 One `(ω, ν, i, f)` summand of the Fan-Migdal Im Σ_i(ω), with G self-consistent and D bare:
 
     w_f g2 { Im[1/(ω + ωq - ε_f - Σin_f(ω + ωq))] (n(ωq) + f(ω + ωq - μ))
            + Im[1/(ω - ωq - ε_f - Σin_f(ω - ωq))] (n(ωq) + 1 - f(ω - ωq - μ)) }.
 
-`g2 = |g|²/(2ωq)` is the stored coupling, `Σin` the clamped input self-energy on the dense grid
-with `Σin_f` its column `i_f` (the IBZ representative of `f`). There is no factor π: Im G = -πA.
+`g2 = |g|²/(2ωq)` is the stored coupling, `Σin` the clamped input self-energy on the grid `ωs`,
+read by linear interpolation, with `Σin_f` its column `i_f` (the IBZ representative of `f`). There
+is no factor π: Im G = -πA.
 A mode with `ωq < ω_acoustic` contributes zero, tested before `g2` is read, since the stored
 `g2` is Inf or huge at Γ-acoustic and negative for an imaginary mode, and a multiply-by-mask would
 give `Inf * 0 = NaN`.
 """
-@inline function fm_term(ω, g2, ωq, ε_f, i_f, Σin, ωd0, dωd, μ, T, w_f, ω_acoustic)
+@inline function fm_term(ω, g2, ωq, ε_f, i_f, Σin, ωs, μ, T, w_f, ω_acoustic)
     ωq < ω_acoustic && return zero(g2)
     n_q = occ_boson(ωq, T)
-    Σ_abs = _interp_linear_uniform(Σin, i_f, ω + ωq, ωd0, dωd)
-    Σ_emi = _interp_linear_uniform(Σin, i_f, ω - ωq, ωd0, dωd)
+    Σ_abs = _interp_linear_grid(Σin, i_f, ω + ωq, ωs)
+    Σ_emi = _interp_linear_grid(Σin, i_f, ω - ωq, ωs)
     z_abs = ω + ωq - ε_f - Σ_abs
     z_emi = ω - ωq - ε_f - Σ_emi
     ImG_abs = -imag(z_abs) / abs2(z_abs)   # Im(1/z), without the scaled complex `inv`
@@ -36,13 +37,13 @@ give `Inf * 0 = NaN`.
 end
 
 """
-    fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_t, ω_acoustic)
+    fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, μ, T, w_t, ω_acoustic)
 
 Add the Fan-Migdal Im Σ of one tile of inner states `f` to `ImΣ_T[ω, i]`, at one temperature `T`
 and chemical potential `μ`. `g2_t[νf, i]` and `ωq_t[νf, i]` are the tile's coupling and phonon
 frequencies with the mode and inner-state indices fused, `νf = ν + nmodes (f - 1)`; `ε_t`,
 `f_to_i_t`, `w_t` are the per-state energies, IBZ representatives and weights of `f`, repeated
-over `ν` in the same `νf` order; `Σin_T[ωd, i]` is the clamped input self-energy on the dense grid
+over `ν` in the same `νf` order; `Σin_T[ω, i]` is the clamped input self-energy on `ωs`
 (see [`fm_term`](@ref)).
 
 The sum over `νf` is a `sum(…; dims = 2)` over a lazy `(ω, νf, i)` broadcast of `fm_term`: nothing
@@ -51,9 +52,8 @@ index being a single contiguous axis keeps the per-element index arithmetic of t
 A host `Broadcasted` reduction runs serially, so on the host the i axis is split into chunks reduced
 in parallel; chunks write disjoint i, so the result does not depend on the thread count.
 """
-function fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_t,
-        ω_acoustic)
-    args = (ωs, ε_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_t, ω_acoustic)
+function fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, μ, T, w_t, ω_acoustic)
+    args = (ωs, ε_t, f_to_i_t, Σin_T, μ, T, w_t, ω_acoustic)
     if ElectronPhonon.on_backend(CPUBackend(), ImΣ_T)
         # Host: thread over chunks of i.
         tforeach(index_chunks(axes(ImΣ_T, 2); n = 2 * Threads.nthreads()); chunking = false) do is
@@ -66,14 +66,13 @@ function fm_imsigma_tile!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, ωd0
     ImΣ_T
 end
 
-function _fm_imsigma_reduce!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, ωd0, dωd, μ, T, w_t,
-        ω_acoustic)
+function _fm_imsigma_reduce!(ImΣ_T, g2_t, ωq_t, ωs, ε_t, f_to_i_t, Σin_T, μ, T, w_t, ω_acoustic)
     nω, ni = size(ImΣ_T)
     nνf = size(g2_t, 1)
     per_νf(x) = reshape(x, 1, nνf, 1)
     bc = Broadcast.instantiate(Broadcast.broadcasted(fm_term,
         reshape(ωs, nω, 1, 1), reshape(g2_t, 1, nνf, ni), reshape(ωq_t, 1, nνf, ni),
-        per_νf(ε_t), per_νf(f_to_i_t), Ref(Σin_T), ωd0, dωd, μ, T, per_νf(w_t), ω_acoustic))
+        per_νf(ε_t), per_νf(f_to_i_t), Ref(Σin_T), Ref(ωs), μ, T, per_νf(w_t), ω_acoustic))
     # `init` is required: a host `Broadcasted` has no `reducedim_init` method without it.
     ImΣ_T .+= reshape(sum(bc; dims = 2, init = zero(eltype(ImΣ_T))), nω, ni)
     ImΣ_T

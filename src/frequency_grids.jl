@@ -1,5 +1,6 @@
-# Linear maps on frequency grids: the Kramers-Kronig and interpolation matrices, built once on the
-# host and applied with `mul!`, and pointwise linear interpolation on a uniform grid.
+# Linear maps on frequency grids: the Kramers-Kronig matrix, built once on the host and applied
+# with `mul!`, the linear-interpolation tables applied by a gather, and pointwise linear
+# interpolation on a sorted grid.
 
 xlogx(x) = iszero(x) ? zero(x) : x * log(abs(x))
 
@@ -43,50 +44,74 @@ function kk_matrix(ωs)
 end
 
 """
-    interp_matrix(ωs, ωs_dense) -> P::Matrix{ComplexF64}
+    interp_table(ωs, xs) -> (j::Vector{Int32}, t::Vector{eltype(ωs)})
 
-The matrix of linear interpolation from the sorted grid `ωs` to the points `ωs_dense`, held flat
-outside `ωs` (`Gridded(Linear())` with `Flat()` extrapolation in Interpolations.jl):
-`P * y` is the interpolant of `y` at `ωs_dense`. Stored complex, because it multiplies the complex
-self-energy, and a real-times-complex `mul!` has no BLAS path on the device.
+The table of linear interpolation from the sorted grid `ωs` to the points `xs`, held flat outside
+`ωs` (`Gridded(Linear())` with `Flat()` extrapolation in Interpolations.jl): `y(xs[r])` is
+`(1 - t[r]) y[j[r]] + t[r] y[j[r] + 1]`. Inside, `ωs[j] <= x < ωs[j+1]` and `t` is the position in
+that cell; below `ωs` the table is `(1, 0)`, above it `(length(ωs) - 1, 1)`. Apply it with
+[`interp_apply!`](@ref).
 """
-function interp_matrix(ωs, ωs_dense)
+function interp_table(ωs, xs)
     FT = eltype(ωs)
-    P = zeros(Complex{FT}, length(ωs_dense), length(ωs))
-    for (r, x) in enumerate(ωs_dense)
+    n = length(ωs)
+    j = Vector{Int32}(undef, length(xs))
+    t = Vector{FT}(undef, length(xs))
+    for (r, x) in enumerate(xs)
         if x <= first(ωs)
             # Below the grid: the first value.
-            P[r, firstindex(ωs)] = 1
+            j[r], t[r] = 1, 0
         elseif x >= last(ωs)
             # Above the grid: the last value.
-            P[r, lastindex(ωs)] = 1
+            j[r], t[r] = n - 1, 1
         else
             # Inside: the two neighbours ωs[j] <= x < ωs[j+1].
-            j = searchsortedlast(ωs, x)
-            t = (x - ωs[j]) / (ωs[j+1] - ωs[j])
-            P[r, j] = 1 - t
-            P[r, j+1] = t
+            jr = searchsortedlast(ωs, x)
+            j[r], t[r] = jr, (x - ωs[jr]) / (ωs[jr+1] - ωs[jr])
         end
     end
-    P
+    j, t
 end
 
 """
-    _interp_linear_uniform(Σin, col, x, ωd0, dωd)
+    interp_apply!(Y, Σ, j, t) -> Y
 
-Linear interpolation of column `col` of `Σin` (sampled on the uniform grid `ωd0 + (j-1) dωd`,
-`j in axes(Σin, 1)`) at `x`, held flat outside the grid: `BSpline(Linear())` with `Flat()`
-extrapolation in Interpolations.jl. Takes isbits values, neither allocates nor throws, so it can
-be called from a device broadcast.
+Apply the table `(j, t)` of [`interp_table`](@ref) to the columns of `Σ`:
+`Y[r, i] = (1 - t[r]) Σ[j[r], i] + t[r] Σ[j[r] + 1, i]`. A gather broadcast over backend arrays, so
+it runs on the host and on the device and is deterministic.
 """
-@inline function _interp_linear_uniform(Σin, col, x, ωd0, dωd)
-    nωd = size(Σin, 1)
-    t = (x - ωd0) / dωd
-    !(t > 0) && return @inbounds Σin[1, col]   # also a NaN x
-    t >= nωd - 1 && return @inbounds Σin[nωd, col]
-    j = unsafe_trunc(Int, t)   # floor, since 0 < t < nωd - 1
-    r = t - j
-    @inbounds (1 - r) * Σin[j + 1, col] + r * Σin[j + 2, col]
+function interp_apply!(Y, Σ, j, t)
+    lerp(Σ, jr, tr, i) = (1 - tr) * Σ[jr, i] + tr * Σ[jr + 1, i]
+    Y .= lerp.(Ref(Σ), j, t, reshape(axes(Y, 2), 1, :))
+end
+
+"""
+    _interp_linear_grid(Σin, col, x, ωs)
+
+Linear interpolation of column `col` of `Σin` (sampled on the sorted grid `ωs`, `size(Σin, 1) ==
+length(ωs)`) at `x`, held flat outside the grid: `Gridded(Linear())` with `Flat()` extrapolation
+in Interpolations.jl. The cell is found by bisection, `log2(length(ωs))` reads of `ωs`. Takes
+isbits values and arrays, neither allocates nor throws, so it can be called from a device
+broadcast.
+"""
+@inline function _interp_linear_grid(Σin, col, x, ωs)
+    n = length(ωs)
+    !(x > (@inbounds ωs[1])) && return @inbounds Σin[1, col]   # also a NaN x
+    x >= (@inbounds ωs[n]) && return @inbounds Σin[n, col]
+    # Bisection with ωs[lo] <= x < ωs[hi], which holds at the start since ωs[1] < x < ωs[n].
+    lo, hi = 1, n
+    while hi - lo > 1
+        mid = (lo + hi) >>> 1
+        if @inbounds ωs[mid] <= x
+            lo = mid
+        else
+            hi = mid
+        end
+    end
+    @inbounds begin
+        t = (x - ωs[lo]) / (ωs[lo + 1] - ωs[lo])
+        (1 - t) * Σin[lo, col] + t * Σin[lo + 1, col]
+    end
 end
 
 """
