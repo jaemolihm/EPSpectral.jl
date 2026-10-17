@@ -6,6 +6,11 @@
 # explicitly so that EP's versions are not in scope here.
 # TODO: upstream a device-compilable form to ElectronPhonon and delete these copies.
 
+# Soft workspace sizes shared by the scGD0 and ladder loops: the cap on one chunk buffer of the inner
+# state sum, and the device memory left free when g2 is kept resident.
+const CHUNK_BYTES = 2^30
+const RESIDENCY_HEADROOM_BYTES = 4_000_000_000
+
 @inline function occ_fermion(e, T)
     if T > sqrt(eps(eltype(T)))
         return 1 / (exp(e / T) + 1)
