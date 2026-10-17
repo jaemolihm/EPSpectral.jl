@@ -21,7 +21,9 @@
         # Covers g2 resident on the device and streamed from host RAM, and run-to-run
         # reproducibility of each. The setup's arrays go to the device; g2 stays on the host,
         # where the loop expects it.
-        on_device(name, value) = name in (:g2, :el_i, :multiplets) || !(value isa Array) ?
+        on_device(name, value) = name == :ωs_buckets ?
+            (; jtab = EP.to_device(gpu, value.jtab), value.x0, value.inv_h) :
+            name in (:g2, :el_i, :multiplets) || !(value isa Array) ?
             value : EP.to_device(gpu, value)
         names = keys(setup_host)
         setup_device = NamedTuple{names}(map(on_device, names, values(setup_host)))

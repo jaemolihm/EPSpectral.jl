@@ -25,7 +25,8 @@
         fused(x) = reshape(permutedims(x, (1, 3, 2)), nm * nf, ni)
         per_νf(x) = vec(repeat(reshape(x, 1, nf), nm))
         ImΣ = fill(0.5, nω, ni)   # accumulated into
-        EPSpectral.fm_imsigma_tile!(ImΣ, fused(g2), fused(ωq), ωs, per_νf(ε_f), per_νf(f_to_i), Σin,
+        EPSpectral.fm_imsigma_tile!(ImΣ, fused(g2), fused(ωq), ωs, EPSpectral.bucket_table(ωs),
+            per_νf(ε_f), per_νf(f_to_i), Σin,
             μ, T, per_νf(w_f), ω_acoustic)
         ImΣ_ref = fill(0.5, nω, ni)
         fd(x) = 1 / (exp(x / T) + 1)

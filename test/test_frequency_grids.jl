@@ -56,15 +56,38 @@
         @test Y[1, :] == y[1, :] && Y[n_out, :] == y[end, :]
     end
 
-    @testset "_interp_linear_grid" begin
-        # The Fan-Migdal lookup against Interpolations' `Gridded(Linear())` with `Flat()`, on the
-        # nonuniform grid, inside, on the nodes and outside, and at a NaN (the first value).
+    @testset "bucket_table, _interp_linear_grid" begin
+        # The cell search finds the cell `searchsortedlast` does, so the lookup is bitwise the one
+        # with a bisection, on the nodes and their neighbouring floats, outside both ends, at the
+        # last node and at a NaN (the first value).
+        function lookup_bisection(Σin, col, x, ωs)
+            n = length(ωs)
+            !(x > ωs[1]) && return Σin[1, col]
+            x >= ωs[n] && return Σin[n, col]
+            j = searchsortedlast(ωs, x)
+            t = (x - ωs[j]) / (ωs[j+1] - ωs[j])
+            (1 - t) * Σin[j, col] + t * Σin[j+1, col]
+        end
+        function same_as_bisection(ωs, xs)
+            Σin = pseudorandom_complex(length(ωs), 2; seed = 4)
+            buckets = EPSpectral.bucket_table(ωs)
+            all(isequal(lookup_bisection(Σin, col, x, ωs),
+                        EPSpectral._interp_linear_grid(Σin, col, x, ωs, buckets))
+                for col in axes(Σin, 2), x in vcat(xs, nextfloat.(ωs), prevfloat.(ωs), NaN))
+        end
+        @test same_as_bisection(ωs, xs)
+        # A grid with a 500x finer region.
+        ωg = vcat(-1.0:0.5:-0.5, -0.499:1e-3:-0.4, 0.1:0.5:1.0)
+        @test same_as_bisection(ωg, range(-1.2, 1.2; length = 20001))
+        # The table has one entry per bucket, so its size follows the finest cell.
+        @test length(EPSpectral.bucket_table(ωg).jtab) <= (ωg[end] - ωg[1]) / (0.999e-3) + 2
+        # Against Interpolations on the nonuniform grid.
         Σin = pseudorandom_complex(length(ωs), 3; seed = 4)
+        buckets = EPSpectral.bucket_table(ωs)
         for col in axes(Σin, 2)
             f = itp(Σin[:, col])
-            err = maximum(abs(EPSpectral._interp_linear_grid(Σin, col, x, ωs) - f(x)) for x in xs)
+            err = maximum(abs(EPSpectral._interp_linear_grid(Σin, col, x, ωs, buckets) - f(x)) for x in xs)
             @test err <= 1e-13 * maximum(abs, Σin)
-            @test EPSpectral._interp_linear_grid(Σin, col, NaN, ωs) == Σin[1, col]
         end
     end
 end
