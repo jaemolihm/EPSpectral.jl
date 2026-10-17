@@ -168,8 +168,8 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     bracket = extrema(ωs_dense) .+ (-FT(0.1), FT(0.1))   # μ search interval (Ry)
 
     # One partition of the inner states for every iteration, for both residencies: chunks of at
-    # most 1 GB of ωq, or `gpu_tile` inner states.
-    nf_chunk = gpu_tile === nothing ? clamp(fld(2^30, sizeof(FT) * nm * ni), 1, nf) :
+    # most `CHUNK_BYTES` of ωq, or `gpu_tile` inner states.
+    nf_chunk = gpu_tile === nothing ? clamp(fld(CHUNK_BYTES, sizeof(FT) * nm * ni), 1, nf) :
                                       min(gpu_tile, nf)
 
     if Σ_init === nothing
@@ -204,7 +204,7 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     else
         # Resident iff g2 fits next to the buffers above with 4 GB to spare.
         ElectronPhonon.reclaim_device_memory(backend)
-        ElectronPhonon.should_stream_per_batch(backend, sizeof(g2) + 4_000_000_000)
+        ElectronPhonon.should_stream_per_batch(backend, sizeof(g2) + RESIDENCY_HEADROOM_BYTES)
     end
     if verbosity > 0 && !ElectronPhonon.is_host(backend)
         @info "scGD0: g2 ($(round(sizeof(g2) / 1e9, digits = 2)) GB) " *

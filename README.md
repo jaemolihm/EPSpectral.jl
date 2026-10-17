@@ -22,5 +22,13 @@ The Fan-Migdal sum is a reduction over a lazy broadcast of one scalar function, 
 array backend (`backend` keyword). `save_scgd0` / `load_scgd0` write and read a result
 with JLD2; a run restarts from one through the `Σ_init` keyword and `occ.μlist`.
 
-Example drivers are in `examples/scgd0/`: the 1D Holstein chain (`run_scgd0_holstein_1d.jl`) and
-SrVO3 (`run_scgd0_srvo3.jl`).
+`run_scgd0_ladder(model, nk, window, res; occ, Ωs)` takes a converged `SCGD0Result` and returns the
+electron-only Kubo conductivity at every temperature and probe frequency `Ωs` (`0` is the DC limit),
+from the bare current vertex (`σ_bubble`) and from the vertex dressed by the ladder of the scGD0
+coupling on the 2x2 Keldysh contour (`σ_ladder`), as an `SCGD0LadderResult`. The ladder equation
+is solved by GMRES (default, `rtol = 1e-2`) or by a fixed-point iteration. The output grid `ωs` of the
+scGD0 run must be commensurate with the shift step `dω_shift` (default `minimum(diff(ωs))`); the cost
+grows as `1 / dω_shift`. `save_scgd0_ladder` / `load_scgd0_ladder` write and read a result with JLD2.
+
+Example drivers are in `examples/scgd0/`: the 1D Holstein chain (`run_scgd0_holstein_1d.jl`,
+`run_scgd0_ladder_holstein_1d.jl`) and SrVO3 (`run_scgd0_srvo3.jl`).

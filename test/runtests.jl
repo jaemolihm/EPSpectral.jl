@@ -21,6 +21,7 @@ pseudorandom_complex(dims...; seed) =
 
 include("holstein_1d_reference.jl")
 include("pb_fixture.jl")
+include("ladder_fixtures.jl")
 
 @testset "EPSpectral.jl" begin
     include("test_kramers_kronig.jl")
@@ -31,6 +32,9 @@ include("pb_fixture.jl")
     include("test_scgd0_holstein.jl")
     include("test_scgd0_pb.jl")
     include("test_ladder_bubble.jl")
+    include("test_ladder_kernel.jl")
+    include("test_ladder_holstein.jl")
+    include("test_ladder_pb.jl")
     if HAVE_CUDA
         include("test_scgd0_gpu.jl")
     else

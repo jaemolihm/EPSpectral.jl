@@ -118,3 +118,183 @@ function ladder_conductivity(J, v, w_i, Wω, Ω, T)
     S = (conj.(v) .* reshape(w_i, 1, :)) * transpose(reshape(Y, size(Y, 2), size(Y, 3)))
     real.(F / (2π * im) .* Array(S))
 end
+
+# --- The D*J kernel: shift tables, the B build, the X gather and the shift sums ---
+#
+# Write h = `dω_shift`, ωs[j] = ωs[1] + h p_j with integer p_j (the grid is commensurate), and let
+# S_m be the hat-basis shift of a vertex by ω_m = m h, (S_m J)(ωs[j]) = J(ωs[j] ± ω_m), with J
+# zero outside `ωs`. For fixed j the shifted vertex is piecewise linear in the shift with kinks at
+# multiples of h, so a phonon of frequency ω_q = (m + r) h couples to the two neighbouring tables:
+#
+#     F_j(ω_q) = (1 - r) (S_m J)(ωs[j]) + r (S_{m+1} J)(ωs[j]).
+#
+# The sums U±, V± of `combine_channels!` then become GEMMs over the pairs (m, f):
+#
+#     U±_i[row] = Σ_{m,f} X±[row, (m, f)] B[(m, f), i, 1],    V±_i[row] = ... B[(m, f), i, 2],
+#     B[m, f, i, 1] = w_f Σ_ν g2[ν, i, f] tent(ω_νfi / h - m),    B[., ., ., 2] has n_B(ω_νfi) too,
+#     X±[(j, c12, a, c0, ri), (m, f)] = Σ_b R_f[a, b] (S_m J_{i(f)})^b[j] at ωs[j] ± ω_m,
+#
+# with tent(x) = max(0, 1 - |x|), `row` = (j, c12, a, c0, ri) and ri = (re, im). A jump of J at an
+# end node of `ωs` (J there is nonzero and zero beyond it) sits on a multiple of h, where the
+# regrouping is exact only for the two-sided limit that the closed table value is.
+
+"""
+    check_commensurate(ωs, dω_shift) -> nothing
+
+Throw an `ArgumentError` unless every node of `ωs` lies on `ωs[1] + dω_shift ℤ` to `1e-8 dω_shift`,
+which the shift tables of the ladder require. The message names the largest step `dω_shift / k`
+(k = 2, ..., 64) on which `ωs` is commensurate and the factor `k` by which the cost grows, or says
+that none exists.
+"""
+function check_commensurate(ωs, dω_shift)
+    deviation(h) = maximum(abs, (ωs .- ωs[1]) ./ h .- round.((ωs .- ωs[1]) ./ h))
+    deviation(dω_shift) <= 1e-8 && return nothing
+    divisor = findfirst(k -> deviation(dω_shift / k) <= 1e-8, 2:64)
+    k = divisor === nothing ? nothing : (2:64)[divisor]
+    advice = k === nothing ?
+        "No step dω_shift / k with k <= 64 makes ωs commensurate; use a different ωs." :
+        "dω_shift = $(dω_shift / k) (= dω_shift / $k) is compatible; the cost of the " *
+        "ladder grows by a factor $k."
+    throw(ArgumentError("ωs is not commensurate with dω_shift = $dω_shift (the largest deviation " *
+        "of a node from the lattice ωs[1] + dω_shift ℤ is $(deviation(dω_shift)) dω_shift). " * advice))
+end
+
+"""
+    shift_tables(ωs, dω_shift, M) -> (; klo, wlo, whi)
+
+The hat-basis shift tables of the ladder. For the sign `s = 1` (shift up) and `s = 2` (shift down),
+`m = 1:M+1` (shift by `(m - 1) dω_shift`) and a node `j`, the shifted vertex is
+`(S J)(ωs[j]) = wlo[j, m, s] J[klo[j, m, s]] + whi[j, m, s] J[klo[j, m, s] + 1]` for a vertex `J`
+sampled on `ωs`, the linear interpolant in the cell of `ωs[j] ± (m - 1) dω_shift`. Both weights
+are zero if that point lies outside `[ωs[1], ωs[end]]` (to `1e-8 dω_shift`). The (1 - r, r)
+regrouping of two tables spreads a nonzero end value of the vertex over one shift step beyond the
+grid (see the comment above `check_commensurate`).
+"""
+function shift_tables(ωs, dω_shift, M)
+    FT = eltype(ωs)
+    nω = length(ωs)
+    tol = FT(1e-8) * dω_shift
+    klo = Array{Int32}(undef, nω, M + 1, 2)
+    wlo = Array{FT}(undef, nω, M + 1, 2)
+    whi = Array{FT}(undef, nω, M + 1, 2)
+    for (s, sign) in enumerate((1, -1)), m in 1:M+1, j in 1:nω
+        x = ωs[j] + sign * (m - 1) * dω_shift
+        # The cell of x (clamped, so that a node hit by round-off lies in the end cell).
+        k = clamp(searchsortedlast(ωs, x), 1, nω - 1)
+        t = clamp((x - ωs[k]) / (ωs[k+1] - ωs[k]), 0, 1)
+        inside = ωs[1] - tol <= x <= ωs[end] + tol
+        klo[j, m, s] = k
+        wlo[j, m, s] = inside ? 1 - t : 0
+        whi[j, m, s] = inside ? t : 0
+    end
+    (; klo, wlo, whi)
+end
+
+# Run `body(is)` over a partition of `axis`: chunks in parallel if `A` is a host array (each chunk
+# writes disjoint outputs, so the result does not depend on the thread count), one call otherwise.
+function _over_chunks(body, A, axis)
+    if ElectronPhonon.on_backend(CPUBackend(), A)
+        tforeach(body, index_chunks(axis; n = 2 * Threads.nthreads()); chunking = false)
+    else
+        body(axis)
+    end
+end
+
+# One element B[m, f, i, type] of the coupling of the shift sums: the sum over the modes ν of the
+# stored coupling `g2[ν, i, f]` with the two-table split `tent` of ω_q = ωq[ν, f, i]; type 2 has
+# the extra n_B factor `nB[ν, f, i]`. `m` is the shift index in units of h, from 0. A mode below
+# `ω_acoustic` is skipped before g2 is read (g2 is Inf or huge at Γ-acoustic).
+@inline function _shift_coupling(g2, ωq, nB, w_f, h, ω_acoustic, m, f, i, type)
+    acc = zero(eltype(g2))
+    for ν in axes(ωq, 1)
+        ω = ωq[ν, f, i]
+        ω < ω_acoustic && continue
+        tent = max(zero(h), 1 - abs(ω / h - m))
+        c = g2[ν, i, f] * tent
+        acc += type == 1 ? c : c * nB[ν, f, i]
+    end
+    w_f[f] * acc
+end
+
+"""
+    compute_shift_coupling!(B, g2, ωq, nB, w_f, dω_shift, ω_acoustic) -> B
+
+Fill `B[m, f, i, type]` (`m = 1:M+1`, shift `(m - 1) dω_shift`) of one chunk of inner states:
+`B[m, f, i, 1] = w_f Σ_ν g2[ν, i, f] tent(ωq[ν, f, i] / dω_shift - (m - 1))` and the same with a
+factor `nB[ν, f, i]` for `type = 2`, over the modes with `ωq >= ω_acoustic`. `tent(x) = max(0,
+1 - |x|)` is the linear split of a frequency onto its two neighbouring shifts.
+"""
+function compute_shift_coupling!(B, g2, ωq, nB, w_f, dω_shift, ω_acoustic)
+    m = reshape(0:size(B, 1) - 1, :, 1, 1, 1)
+    i = reshape(axes(B, 3), 1, 1, :, 1)
+    type = reshape(axes(B, 4), 1, 1, 1, :)
+    _over_chunks(B, axes(B, 2)) do fs
+        view(B, :, fs, :, :) .= _shift_coupling.(Ref(g2), Ref(ωq), Ref(nB), Ref(w_f), dω_shift,
+            ω_acoustic, m, reshape(fs, 1, :, 1, 1), i, type)
+    end
+    B
+end
+
+# One element of the shifted, rotated vertex X[j, c12, a, c0, ri, m, f] (see the header).
+@inline function _shifted_vertex_term(J, R, f_to_i, klo, wlo, whi, j, c12, a, c0, ri, m, f)
+    i = f_to_i[f]
+    k, wl, wh = klo[j, m], wlo[j, m], whi[j, m]
+    x = zero(real(eltype(J)))
+    for b in axes(R, 2)
+        z = wl * J[k, c12, b, c0, i] + wh * J[k + 1, c12, b, c0, i]
+        x += R[a, b, f] * (ri == 1 ? real(z) : imag(z))
+    end
+    x
+end
+
+"""
+    gather_shifted_vertex!(X, J, R, f_to_i, klo, wlo, whi) -> X
+
+Fill `X[j, c12, a, c0, ri, m, f] = Σ_b R[a, b, f] (S_m J)^b_{i(f)}[j]` (`ri` = real, imaginary
+part) for the vertex `J[ω, c12, cart, c0, i]`, the rotations `R[:, :, f]`, the IBZ representatives
+`f_to_i[f]` of a chunk of inner states, and the shift tables of one sign: `klo`, `wlo`, `whi` of
+size `(nω, M + 1)` ([`shift_tables`](@ref)).
+"""
+function gather_shifted_vertex!(X, J, R, f_to_i, klo, wlo, whi)
+    index(n, dim) = reshape(1:n, ntuple(d -> d == dim ? n : 1, 7))
+    j, c12, a, c0, ri, m = (index(size(X, d), d) for d in 1:6)
+    _over_chunks(X, axes(X, 7)) do fs
+        view(X, :, :, :, :, :, :, fs) .= _shifted_vertex_term.(Ref(J), Ref(R), Ref(f_to_i),
+            Ref(klo), Ref(wlo), Ref(whi), j, c12, a, c0, ri, m, reshape(fs, 1, 1, 1, 1, 1, 1, :))
+    end
+    X
+end
+
+# The complex vertex-shaped value of the four channels K^{ab} (with the contour signs s_a s_b) at
+# one element, from the shift sums C±[ω, c12, a, c0, ri, i, type] and the Kramers-Kronig image
+# KY of ½(U+ - U-) (same layout without `type`):
+#   K¹¹ = -i KK[½(U+ - U-)] - ½(U+ + U-) - (V+ + V-)      K²² = same with +i
+#   K²¹ = -(V+ + U- + V-)                                  K¹² = -(U+ + V+ + V-)
+# and K²¹, K¹² carry s_a s_b = -1.
+@inline function _channel_term(Cp, Cm, KY, ω, c12, a, c0, i)
+    sum_c(C, type) = complex(C[ω, c12, a, c0, 1, i, type], C[ω, c12, a, c0, 2, i, type])
+    Up, Um, Vp, Vm = sum_c(Cp, 1), sum_c(Cm, 1), sum_c(Cp, 2), sum_c(Cm, 2)
+    if c12 == 1 || c12 == 4
+        ky = complex(KY[ω, c12, a, c0, 1, i], KY[ω, c12, a, c0, 2, i])
+        (c12 == 1 ? -im : im) * ky - (Up + Um) / 2 - (Vp + Vm)
+    elseif c12 == 2
+        (Vp + Um + Vm)
+    else
+        (Up + Vp + Vm)
+    end
+end
+
+"""
+    combine_channels!(KJ, Cp, Cm, K, Y, KY) -> KJ
+
+The channels `KJ[ω, c12, cart, c0, i] = s_a s_b K^{ab}[J]` of the ladder kernel (`c12` = (a, b),
+`s_1 = 1`, `s_2 = -1`) from the shift sums `Cp`, `Cm` = `[U; V]` of the upward and downward shifts,
+each of size `(nω, 4, 3, 2, 2, ni, 2)` (real/imaginary part, then `type` = U, V). The principal-value
+part is `K` (the spline Kramers-Kronig matrix) applied to `½(U+ - U-)`; `Y` and `KY` are real
+work arrays of size `(nω, 4, 3, 2, 2, ni)`.
+"""
+function combine_channels!(KJ, Cp, Cm, K, Y, KY)
+    Y .= (view(Cp, :, :, :, :, :, :, 1) .- view(Cm, :, :, :, :, :, :, 1)) ./ 2
+    mul!(reshape(KY, size(KY, 1), :), K, reshape(Y, size(Y, 1), :))
+    KJ .= _channel_term.(Ref(Cp), Ref(Cm), Ref(KY), _vertex_indices(KJ)...)
+end
