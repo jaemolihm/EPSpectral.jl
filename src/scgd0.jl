@@ -135,7 +135,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
     length(group) > 1 && push!(multiplets, group)
 
     ωs_dense = range(extrema(ωs)...; step = dω_dense)
-    j_dense, t_dense = interp_table(ωs, ωs_dense)
+    j_dense, t_dense = linear_interpolation_table(ωs, ωs_dense)
 
     # Starting μ: given, or from the bare window bands on a copy, so `occ` is not modified.
     μ_start = if chemical_potential_is_computed(occ)
@@ -153,7 +153,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
        nstates_base = el_i.nstates_base, multiplets,
        ωs = to_device(backend, collect(FT, ωs)), ωs_dense,
        j_dense = to_device(backend, j_dense), t_dense = to_device(backend, t_dense),
-       K = to_device(backend, kk_matrix(ωs)), μ_start)
+       K = to_device(backend, kramers_kronig_matrix(ωs)), μ_start)
 end
 
 # The scGD0 iteration on `setup` (see `_setup_scgd0`; the fields read here can also be built by
@@ -274,7 +274,7 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
         for iT in iTs
             Σ_new_T = view(Σ_new, :, :, iT)
             # 6. Spectral DOS from the unclamped Σ, on the dense grid.
-            interp_apply!(Σd, Σ_new_T, j_dense, t_dense)
+            apply_interpolation_table!(Σd, Σ_new_T, j_dense, t_dense)
             A .= .-imag.(inv.(ωs_dense .- transpose(ε_i) .- Σd)) ./ π
             mul!(D, A, w_i, dωd, 0)
             hist_minA[iT, iter] = minimum(sum(A; dims = 1)) * dωd
