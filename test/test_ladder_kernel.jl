@@ -93,6 +93,22 @@ end
         end
     end
 
+    @testset "stars of inner states and chunks" begin
+        pb = pb_ladder_case()
+        (; fperm, fptr, f_to_i) = pb.ladder
+        ni = pb.res.el_i.n
+        @test length(fperm) == length(f_to_i) && sort(fperm) == eachindex(f_to_i)
+        @test fptr[1] == 1 && fptr[end] == length(f_to_i) + 1
+        @test all(i -> all(==(i), f_to_i[fperm[fptr[i]:fptr[i + 1] - 1]]), 1:ni)
+        # Every outer state is in exactly one chunk, and a chunk holds whole stars.
+        for gpu_tile in (nothing, 7, 100)
+            chunks = EPSpectral._ladder_work(pb.ladder, EP.CPUBackend(), gpu_tile, 0).chunks
+            @test reduce(vcat, [collect(c.ips) for c in chunks]) == 1:ni
+            @test sum(c.nf for c in chunks) == length(f_to_i)
+            @test all(c -> c.nf == fptr[last(c.ips) + 1] - fptr[first(c.ips)], chunks)
+        end
+    end
+
     @testset "apply_ladder! against the naive loop" begin
         eV = unit_to_aru(:eV)
         pb = pb_ladder_case()

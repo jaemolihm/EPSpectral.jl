@@ -53,11 +53,12 @@ cost grows as `1 / dω_shift`. `occ` supplies `spin_degeneracy` and `volume`, an
 equal `scgd0.Tlist`. The linear problem is solved for each `(T, Ω)` in turn by
 `solver = :gmres` (warm-started from the previous `Ω` at the same `T`; residual below `rtol` times
 the norm of `J0`, at most `maxiter` iterations) or `solver = :fixed_point` (from `J0`,
-`J ← J0 + L(J)` until the relative change of σ is below `rtol`). An unconverged solve returns its last σ, flagged in `converged`, with one
-warning.
+`J ← J0 + L(J)` until the relative change of σ is below `rtol`). An unconverged solve returns its
+last σ, flagged in `converged`, with one warning.
 
 Keywords as in [`run_scgd0`](@ref): `backend`, `symmetry`, `verbosity`, `gpu_tile` (inner states
-per chunk), `ω_acoustic`, `electron_degen_cutoff`; the others go to `run_eph_over_k_and_kq`.
+per chunk, rounded up to whole stars), `ω_acoustic`, `electron_degen_cutoff`; the others go to
+`run_eph_over_k_and_kq`.
 """
 function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
         occ::ElectronOccupationParams, Ωs = [zero(FT)], solver = :gmres, rtol = 1e-2, maxiter = 30,
@@ -101,8 +102,9 @@ end
 
 # What the ladder needs on top of the `_setup_scgd0` fields: the rotation R[:, :, f] and IBZ
 # representative of every inner state (the averaged vector unfolding of ElectronPhonon, TR-odd, as
-# a dense array), the hat-basis shift tables on the commensurate `ωs`, the quadrature weights and
-# the band velocities v[cart, i]. `symmetry === nothing` has no rotation.
+# a dense array) and the inner states grouped by representative, the hat-basis shift tables on the
+# commensurate `ωs`, the quadrature weights and the band velocities v[cart, i].
+# `symmetry === nothing` has no rotation.
 function _setup_ladder(setup, scgd0, symmetry; dω_shift, backend)
     (; el_i, el_f, ωph) = setup
     FT = eltype(setup.g2)
@@ -132,36 +134,68 @@ function _setup_ladder(setup, scgd0, symmetry; dω_shift, backend)
         end
     end
 
+    # The inner states grouped by representative: the star of outer state i is
+    # `fperm[fptr[i]:fptr[i + 1] - 1]` (the column structure of the unfolding map).
+    fperm = sortperm(f_to_i)
+    star_sizes = zeros(Int, el_i.n)
+    for i in f_to_i
+        star_sizes[i] += 1
+    end
+    fptr = cumsum([1; star_sizes])
+
     M = ceil(Int, maximum(ωph) / dω_shift) + 1
     klo, wlo, whi = shift_tables(ωs, FT(dω_shift), M)
-    (; setup..., R = to_device(backend, R), klo = to_device(backend, klo),
+    (; setup..., fperm, fptr, R = to_device(backend, R), klo = to_device(backend, klo),
        wlo = to_device(backend, wlo), whi = to_device(backend, whi), M, dω_shift = FT(dω_shift),
        Wω = to_device(backend, trapezoid_weights(ωs)),
        v = to_device(backend, reduce(hcat, el_i.vs)))
 end
 
-# The work arrays of `apply_ladder!` and the chunking of the inner states: chunks of `gpu_tile`
-# states, or of at most `CHUNK_BYTES` for the larger of the coupling B, the shifted vertex X and
-# the phonon frequencies. g2 is resident on the device or streamed from host RAM, as in
+# The work arrays of `apply_ladder!` and its chunks, each a run of outer states with their stars of
+# inner states: at most `gpu_tile` inner states (at least one star). The buffers are held to
+# `CHUNK_BYTES` each: B and the phonon frequencies by the chunk's inner states, B̃ and the shifted
+# vertex X by its outer states. g2 is resident on the device or streamed from host RAM, as in
 # `_loop_scgd0`. `solver_bytes` is the device memory the solver allocates after this call (the
 # GMRES basis), which the residency decision leaves free.
 function _ladder_work(ladder, backend, gpu_tile, verbosity; solver_bytes = 0)
-    (; g2, ωs, M) = ladder
+    (; g2, ωs, M, fperm, fptr, w_f, iks_f) = ladder
     FT = eltype(g2)
     nm, ni, nf = size(g2)
     nω = length(ωs)
-    nrow = nω * 4 * 3 * 2 * 2
-    bytes_per_f = sizeof(FT) * max(2 * (M + 1) * ni, nrow * (M + 1), nm * ni)
-    nf_chunk = gpu_tile === nothing ? clamp(fld(CHUNK_BYTES, bytes_per_f), 1, nf) : min(gpu_tile, nf)
-    work = (; nf_chunk,
+    nrow = nω * 4 * 2 * 2
+    bytes_per_f = sizeof(FT) * max(2 * (M + 1) * ni, nm * ni)
+    bytes_per_i = sizeof(FT) * (M + 1) * max(3 * 3 * 2 * ni, 3 * nrow)
+    max_f = gpu_tile === nothing ? max(fld(CHUNK_BYTES, bytes_per_f), 1) : gpu_tile
+    max_i = max(fld(CHUNK_BYTES, bytes_per_i), 1)
+    # Chunk ranges: grow by outer states while both limits hold; the first state is always taken.
+    ranges = UnitRange{Int}[]
+    i1 = 1
+    while i1 <= ni
+        i2 = i1
+        while i2 < ni && i2 - i1 + 2 <= max_i && fptr[i2 + 2] - fptr[i1] <= max_f
+            i2 += 1
+        end
+        push!(ranges, i1:i2)
+        i1 = i2 + 1
+    end
+    chunks = map(ranges) do ips
+        inner = fperm[fptr[first(ips)]:fptr[last(ips) + 1] - 1]
+        (; ips, nf = length(inner), fidx = to_device(backend, inner),
+            star_ptr = to_device(backend, fptr[first(ips):last(ips) + 1] .- fptr[first(ips)] .+ 1),
+            w_f = w_f[inner], iks_f = iks_f[inner])
+    end
+    nf_chunk = maximum(c -> c.nf, chunks)
+    ni_chunk = maximum(c -> length(c.ips), chunks)
+    work = (; chunks,
         ωq_buf = alloc(backend, FT, nm * nf_chunk * ni), nB_buf = alloc(backend, FT, nm * nf_chunk * ni),
         B_buf = alloc(backend, FT, 2 * (M + 1) * nf_chunk * ni),
-        X_buf = alloc(backend, FT, nrow * (M + 1) * nf_chunk),
-        Cp = alloc(backend, FT, nrow, 2ni), Cm = alloc(backend, FT, nrow, 2ni),
-        Y = alloc(backend, FT, nω, 4, 3, 2, 2, ni), KY = alloc(backend, FT, nω, 4, 3, 2, 2, ni),
+        Bt_buf = alloc(backend, FT, (M + 1) * 3 * ni_chunk * 3 * ni * 2),
+        X_buf = alloc(backend, FT, nrow * (M + 1) * 3 * ni_chunk),
+        Cp = alloc(backend, FT, nrow, 3 * ni * 2), Cm = alloc(backend, FT, nrow, 3 * ni * 2),
+        Y = alloc(backend, FT, nω, 4, 2, 2, 3, ni), KY = alloc(backend, FT, nω, 4, 2, 2, 3, ni),
         KJ = alloc(backend, Complex{FT}, nω, 4, 3, 2, ni))
     streamed = if ElectronPhonon.is_host(backend)
-        false   # no streaming on the host: a chunk is a view of g2
+        false   # no streaming on the host: a chunk reads g2 in place
     elseif gpu_tile !== nothing
         true    # an Int `gpu_tile` forces streaming
     else
@@ -172,12 +206,14 @@ function _ladder_work(ladder, backend, gpu_tile, verbosity; solver_bytes = 0)
     end
     if verbosity > 0 && !ElectronPhonon.is_host(backend)
         @info "ladder: g2 ($(round(sizeof(g2) / 1e9, digits = 2)) GB) " *
-              (streamed ? "streamed from host RAM in chunks of $nf_chunk inner states" :
-                          "resident on the device")
+              (streamed ? "streamed from host RAM in $(length(chunks)) chunks of up to $nf_chunk " *
+                          "inner states" : "resident on the device")
     end
-    # Read-only for the whole run, so a host alias of the caller's g2 is safe.
+    # Read-only for the whole run, so a host alias of the caller's g2 is safe. A streamed chunk is
+    # gathered into the host staging array, then copied to the device.
     (; work..., streamed, g2_dev = streamed ? alloc(backend, FT, nm, ni, nf_chunk) :
-                                              to_device(backend, g2))
+                                              to_device(backend, g2),
+       g2_stage = streamed ? Array{FT}(undef, nm, ni, nf_chunk) : nothing)
 end
 
 """
@@ -186,49 +222,53 @@ end
 The ladder kernel on the vertex `J[ω, c12, cart, c0, i]` at temperature `T` and the propagators
 `Gm`, `Gp` of one probe frequency: `L(J) = -Gm (s ⊙ K[J]) Gp`, where `K^{ab}[J]_i(ε) = Σ_{f,ν} w_f
 g2 ∫dω d^{ba}(ω) R_f J_{i(f)}^{ab}(ε + ω)` with the bare phonon propagator `d`, evaluated as the
-four shifted sums U±, V± in chunks of inner states and their combination
-([`combine_channels!`](@ref)). `ladder` is the output of `_setup_ladder` and `work` that of
-`_ladder_work`. Modes below `ω_acoustic` are skipped.
+four shifted sums U±, V± in chunks of outer states with their stars of inner states and their
+combination ([`combine_channels!`](@ref)). `ladder` is the output of `_setup_ladder` and `work`
+that of `_ladder_work`. Modes below `ω_acoustic` are skipped.
 """
 @views function apply_ladder!(LJ, J, ladder, work, Gm, Gp, T; ω_acoustic)
-    (; g2, ωph, iq_kk, iks_i, iks_f, w_f, f_to_i, R, klo, wlo, whi, K, ωs, M, dω_shift) = ladder
-    (; nf_chunk, streamed, g2_dev, ωq_buf, nB_buf, B_buf, X_buf, Cp, Cm, Y, KY, KJ) = work
-    nm, ni, nf = size(g2)
+    (; g2, ωph, iq_kk, iks_i, R, klo, wlo, whi, K, ωs, M, dω_shift) = ladder
+    (; chunks, streamed, g2_dev, g2_stage, ωq_buf, nB_buf, B_buf, Bt_buf, X_buf, Cp, Cm, Y, KY, KJ) = work
+    nm, ni, _ = size(g2)
     nω = length(ωs)
     nrow = size(Cp, 1)
     fill!(Cp, 0)
     fill!(Cm, 0)
-    for fs in Iterators.partition(1:nf, nf_chunk)
-        nfs = length(fs)
+    for (; ips, nf, fidx, star_ptr, w_f, iks_f) in chunks
+        nip = length(ips)
         # ωq[ν, f, i] and n_B(ωq), as in the Fan-Migdal sum.
-        ωq = reshape(ωq_buf[1:nm * nfs * ni], nm, nfs, ni)
-        gather_pair_table!(ωq, ωph, transpose(iq_kk), iks_f[fs], iks_i)
-        nB = reshape(nB_buf[1:nm * nfs * ni], nm, nfs, ni)
+        ωq = reshape(ωq_buf[1:nm * nf * ni], nm, nf, ni)
+        gather_pair_table!(ωq, ωph, transpose(iq_kk), iks_f, iks_i)
+        nB = reshape(nB_buf[1:nm * nf * ni], nm, nf, ni)
         _over_chunks(nB, axes(nB, 2)) do cs
             nB[:, cs, :] .= occ_boson.(ωq[:, cs, :], T)
         end
-        g2_slab = if streamed
-            # The chunk's contiguous slab g2[:, :, fs], copied to the device.
-            copyto!(g2_dev, 1, g2, nm * ni * (first(fs) - 1) + 1, nm * ni * nfs)
-            g2_dev[:, :, 1:nfs]
+        B = reshape(B_buf[1:2 * (M + 1) * nf * ni], M + 1, nf, ni, 2)
+        if streamed
+            # The chunk's slabs g2[:, :, f], gathered on the host and copied to the device.
+            for (c, f) in enumerate(Array(fidx))
+                copyto!(g2_stage, nm * ni * (c - 1) + 1, g2, nm * ni * (f - 1) + 1, nm * ni)
+            end
+            copyto!(g2_dev, 1, g2_stage, 1, nm * ni * nf)
+            compute_shift_coupling!(B, g2_dev, Base.OneTo(nf), ωq, nB, w_f, dω_shift, ω_acoustic)
         else
-            # Resident: a view.
-            g2_dev[:, :, fs]
+            # Resident: indexed in place.
+            compute_shift_coupling!(B, g2_dev, fidx, ωq, nB, w_f, dω_shift, ω_acoustic)
         end
-        B = reshape(B_buf[1:2 * (M + 1) * nfs * ni], M + 1, nfs, ni, 2)
-        compute_shift_coupling!(B, g2_slab, ωq, nB, w_f[fs], dω_shift, ω_acoustic)
-        X = reshape(X_buf[1:nrow * (M + 1) * nfs], nω, 4, 3, 2, 2, M + 1, nfs)
+        Bt = reshape(Bt_buf[1:(M + 1) * 3 * nip * 3 * ni * 2], M + 1, 3, nip, 3, ni, 2)
+        compute_star_coupling!(Bt, B, R, fidx, star_ptr)
+        Bt2 = reshape(Bt, (M + 1) * 3 * nip, 3 * ni * 2)
+        X = reshape(X_buf[1:nrow * (M + 1) * 3 * nip], nω, 4, 2, 2, M + 1, 3, nip)
         for (s, C) in ((1, Cp), (2, Cm))
-            gather_shifted_vertex!(X, J, R[:, :, fs], f_to_i[fs], klo[:, :, s], wlo[:, :, s],
-                whi[:, :, s])
-            # C += X B, threaded over row blocks of C on the host.
-            X2, B2 = reshape(X, nrow, (M + 1) * nfs), reshape(B, (M + 1) * nfs, 2ni)
+            gather_shifted_vertex!(X, J, klo[:, :, s], wlo[:, :, s], whi[:, :, s], first(ips))
+            # C += X B̃, threaded over row blocks of C on the host.
+            X2 = reshape(X, nrow, (M + 1) * 3 * nip)
             _over_chunks(C, axes(C, 1)) do rows
-                mul!(C[rows, :], X2[rows, :], B2, 1, 1)
+                mul!(C[rows, :], X2[rows, :], Bt2, 1, 1)
             end
         end
     end
-    combine_channels!(KJ, reshape(Cp, nω, 4, 3, 2, 2, ni, 2), reshape(Cm, nω, 4, 3, 2, 2, ni, 2),
+    combine_channels!(KJ, reshape(Cp, nω, 4, 2, 2, 3, ni, 2), reshape(Cm, nω, 4, 2, 2, 3, ni, 2),
         K, Y, KY)
     attach!(LJ, Gm, KJ, Gp)
     LJ .*= -1

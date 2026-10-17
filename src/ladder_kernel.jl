@@ -119,7 +119,7 @@ function ladder_conductivity(J, v, w_i, Wω, Ω, T)
     real.(F / (2π * im) .* Array(S))
 end
 
-# --- The D*J kernel: shift tables, the B build, the X gather and the shift sums ---
+# --- The D*J kernel: shift tables, the B build, the star contraction and the shift sums ---
 #
 # Write h = `dω_shift`, ωs[j] = ωs[1] + h p_j with integer p_j (the grid is commensurate), and let
 # S_m be the hat-basis shift of a vertex by ω_m = m h, (S_m J)(ωs[j]) = J(ωs[j] ± ω_m), with J
@@ -128,15 +128,19 @@ end
 #
 #     F_j(ω_q) = (1 - r) (S_m J)(ωs[j]) + r (S_{m+1} J)(ωs[j]).
 #
-# The sums U±, V± of `combine_channels!` then become GEMMs over the pairs (m, f):
+# The inner states f are grouped by their IBZ representative i' (the star of i'), and the rotation
+# R_f of the unfolded vertex is folded into the coupling, so that the sums U±, V± of
+# `combine_channels!` are GEMMs over (m, b, i') with no gather of the vertex per inner state:
 #
-#     U±_i[row] = Σ_{m,f} X±[row, (m, f)] B[(m, f), i, 1],    V±_i[row] = ... B[(m, f), i, 2],
+#     U±_i[row] = Σ_{m,b,i'} X±[row, (m, b, i')] B̃[(m, b, i'), (a, i, 1)],   V±: type 2,
 #     B[m, f, i, 1] = w_f Σ_ν g2[ν, i, f] tent(ω_νfi / h - m),    B[., ., ., 2] has n_B(ω_νfi) too,
-#     X±[(j, c12, a, c0, ri), (m, f)] = Σ_b R_f[a, b] (S_m J_{i(f)})^b[j] at ωs[j] ± ω_m,
+#     B̃[m, b, i', a, i, type] = Σ_{f in star(i')} R_f[a, b] B[m, f, i, type],
+#     X±[(j, c12, c0, ri), (m, b, i')] = (S_m J_{i'})^b[j] at ωs[j] ± ω_m,
 #
-# with tent(x) = max(0, 1 - |x|), `row` = (j, c12, a, c0, ri) and ri = (re, im). A jump of J at an
-# end node of `ωs` (J there is nonzero and zero beyond it) sits on a multiple of h, where the
-# regrouping is exact only for the two-sided limit that the closed table value is.
+# with tent(x) = max(0, 1 - |x|), `row` = (j, c12, c0, ri) and ri = (re, im). The result C has the
+# layout (ω, c12, c0, ri, a, i, type). A jump of J at an end node of `ωs` (J there is nonzero and
+# zero beyond it) sits on a multiple of h, where the regrouping is exact only for the two-sided
+# limit that the closed table value is.
 
 """
     check_commensurate(ωs, dω_shift) -> nothing
@@ -201,81 +205,105 @@ function _over_chunks(body, A, axis)
 end
 
 # One element B[m, f, i, type] of the coupling of the shift sums: the sum over the modes ν of the
-# stored coupling `g2[ν, i, f]` with the two-table split `tent` of ω_q = ωq[ν, f, i]; type 2 has
-# the extra n_B factor `nB[ν, f, i]`. `m` is the shift index in units of h, from 0. A mode below
-# `ω_acoustic` is skipped before g2 is read (g2 is Inf or huge at Γ-acoustic).
-@inline function _shift_coupling(g2, ωq, nB, w_f, h, ω_acoustic, m, f, i, type)
+# stored coupling `g2[ν, i, fidx[f]]` with the two-table split `tent` of ω_q = ωq[ν, f, i]; type 2
+# has the extra n_B factor `nB[ν, f, i]`. `f` is the position in the chunk, `fidx[f]` the inner
+# state it holds in `g2`, `m` the shift index in units of h, from 0. A mode below `ω_acoustic` is
+# skipped before g2 is read (g2 is Inf or huge at Γ-acoustic).
+@inline function _shift_coupling(g2, fidx, ωq, nB, w_f, h, ω_acoustic, m, f, i, type)
     acc = zero(eltype(g2))
     for ν in axes(ωq, 1)
         ω = ωq[ν, f, i]
         ω < ω_acoustic && continue
         tent = max(zero(h), 1 - abs(ω / h - m))
-        c = g2[ν, i, f] * tent
+        c = g2[ν, i, fidx[f]] * tent
         acc += type == 1 ? c : c * nB[ν, f, i]
     end
     w_f[f] * acc
 end
 
 """
-    compute_shift_coupling!(B, g2, ωq, nB, w_f, dω_shift, ω_acoustic) -> B
+    compute_shift_coupling!(B, g2, fidx, ωq, nB, w_f, dω_shift, ω_acoustic) -> B
 
 Fill `B[m, f, i, type]` (`m = 1:M+1`, shift `(m - 1) dω_shift`) of one chunk of inner states:
-`B[m, f, i, 1] = w_f Σ_ν g2[ν, i, f] tent(ωq[ν, f, i] / dω_shift - (m - 1))` and the same with a
-factor `nB[ν, f, i]` for `type = 2`, over the modes with `ωq >= ω_acoustic`. `tent(x) = max(0,
-1 - |x|)` is the linear split of a frequency onto its two neighbouring shifts.
+`B[m, f, i, 1] = w_f[f] Σ_ν g2[ν, i, fidx[f]] tent(ωq[ν, f, i] / dω_shift - (m - 1))` and the same
+with a factor `nB[ν, f, i]` for `type = 2`, over the modes with `ωq >= ω_acoustic`.
+`tent(x) = max(0, 1 - |x|)` is the linear split of a frequency onto its two neighbouring shifts.
 """
-function compute_shift_coupling!(B, g2, ωq, nB, w_f, dω_shift, ω_acoustic)
+function compute_shift_coupling!(B, g2, fidx, ωq, nB, w_f, dω_shift, ω_acoustic)
     m = reshape(0:size(B, 1) - 1, :, 1, 1, 1)
     i = reshape(axes(B, 3), 1, 1, :, 1)
     type = reshape(axes(B, 4), 1, 1, 1, :)
     _over_chunks(B, axes(B, 2)) do fs
-        view(B, :, fs, :, :) .= _shift_coupling.(Ref(g2), Ref(ωq), Ref(nB), Ref(w_f), dω_shift,
-            ω_acoustic, m, reshape(fs, 1, :, 1, 1), i, type)
+        view(B, :, fs, :, :) .= _shift_coupling.(Ref(g2), Ref(fidx), Ref(ωq), Ref(nB), Ref(w_f),
+            dω_shift, ω_acoustic, m, reshape(fs, 1, :, 1, 1), i, type)
     end
     B
 end
 
-# One element of the shifted, rotated vertex X[j, c12, a, c0, ri, m, f] (see the header).
-@inline function _shifted_vertex_term(J, R, f_to_i, klo, wlo, whi, j, c12, a, c0, ri, m, f)
-    i = f_to_i[f]
-    k, wl, wh = klo[j, m], wlo[j, m], whi[j, m]
-    x = zero(real(eltype(J)))
-    for b in axes(R, 2)
-        z = wl * J[k, c12, b, c0, i] + wh * J[k + 1, c12, b, c0, i]
-        x += R[a, b, f] * (ri == 1 ? real(z) : imag(z))
+# One element B̃[m, b, ip, a, i, type] of the star contraction: the coupling of the inner states
+# `fptr[ip]:fptr[ip + 1] - 1` of the chunk (the star of the outer state `ip`) rotated by R_f.
+@inline function _star_coupling(B, R, fidx, fptr, m, b, ip, a, i, type)
+    acc = zero(eltype(B))
+    for f in fptr[ip]:fptr[ip + 1] - 1
+        acc += R[a, b, fidx[f]] * B[m, f, i, type]
     end
-    x
+    acc
 end
 
 """
-    gather_shifted_vertex!(X, J, R, f_to_i, klo, wlo, whi) -> X
+    compute_star_coupling!(Bt, B, R, fidx, fptr) -> Bt
 
-Fill `X[j, c12, a, c0, ri, m, f] = Σ_b R[a, b, f] (S_m J)^b_{i(f)}[j]` (`ri` = real, imaginary
-part) for the vertex `J[ω, c12, cart, c0, i]`, the rotations `R[:, :, f]`, the IBZ representatives
-`f_to_i[f]` of a chunk of inner states, and the shift tables of one sign: `klo`, `wlo`, `whi` of
-size `(nω, M + 1)` ([`shift_tables`](@ref)).
+Fill `Bt[m, b, ip, a, i, type] = Σ_{f in star(ip)} R[a, b, fidx[f]] B[m, f, i, type]` for the outer
+states `ip` of a chunk, from the coupling `B` of the chunk's inner states ([`compute_shift_coupling!`](@ref)),
+the rotations `R[:, :, f]` of all inner states, `fidx[f]` (the inner state at chunk position `f`)
+and the star boundaries `fptr` (the star of `ip` holds the chunk positions `fptr[ip]:fptr[ip + 1] - 1`).
 """
-function gather_shifted_vertex!(X, J, R, f_to_i, klo, wlo, whi)
+function compute_star_coupling!(Bt, B, R, fidx, fptr)
+    index(n, dim) = reshape(1:n, ntuple(d -> d == dim ? n : 1, 6))
+    m, b, _, a, i, type = (index(size(Bt, d), d) for d in 1:6)
+    _over_chunks(Bt, axes(Bt, 3)) do ips
+        view(Bt, :, :, ips, :, :, :) .= _star_coupling.(Ref(B), Ref(R), Ref(fidx), Ref(fptr), m, b,
+            reshape(ips, 1, 1, :, 1, 1, 1), a, i, type)
+    end
+    Bt
+end
+
+# One element of the shifted vertex X[j, c12, c0, ri, m, b, ip] (see the header) of the outer
+# state `i1 - 1 + ip`.
+@inline function _shifted_vertex_term(J, klo, wlo, whi, i1, j, c12, c0, ri, m, b, ip)
+    i = i1 - 1 + ip
+    z = wlo[j, m] * J[klo[j, m], c12, b, c0, i] + whi[j, m] * J[klo[j, m] + 1, c12, b, c0, i]
+    ri == 1 ? real(z) : imag(z)
+end
+
+"""
+    gather_shifted_vertex!(X, J, klo, wlo, whi, i1) -> X
+
+Fill `X[j, c12, c0, ri, m, b, ip] = (S_m J_{i1 - 1 + ip})^b[j]` (`ri` = real, imaginary part) for
+the vertex `J[ω, c12, cart, c0, i]`, the outer states `i1:i1 + size(X, 7) - 1` and the shift tables
+of one sign: `klo`, `wlo`, `whi` of size `(nω, M + 1)` ([`shift_tables`](@ref)).
+"""
+function gather_shifted_vertex!(X, J, klo, wlo, whi, i1)
     index(n, dim) = reshape(1:n, ntuple(d -> d == dim ? n : 1, 7))
-    j, c12, a, c0, ri, m = (index(size(X, d), d) for d in 1:6)
-    _over_chunks(X, axes(X, 7)) do fs
-        view(X, :, :, :, :, :, :, fs) .= _shifted_vertex_term.(Ref(J), Ref(R), Ref(f_to_i),
-            Ref(klo), Ref(wlo), Ref(whi), j, c12, a, c0, ri, m, reshape(fs, 1, 1, 1, 1, 1, 1, :))
+    j, c12, c0, ri, m, b, ip = (index(size(X, d), d) for d in 1:7)
+    _over_chunks(X, axes(X, 7)) do ips
+        view(X, :, :, :, :, :, :, ips) .= _shifted_vertex_term.(Ref(J), Ref(klo), Ref(wlo),
+            Ref(whi), i1, j, c12, c0, ri, m, b, reshape(ips, 1, 1, 1, 1, 1, 1, :))
     end
     X
 end
 
 # The complex vertex-shaped value of the four channels K^{ab} (with the contour signs s_a s_b) at
-# one element, from the shift sums C±[ω, c12, a, c0, ri, i, type] and the Kramers-Kronig image
-# KY of ½(U+ - U-) (same layout without `type`):
+# one element, from the shift sums C±[ω, c12, c0, ri, a, i, type] and the Kramers-Kronig image
+# KY[ω, c12, c0, ri, a, i] of ½(U+ - U-):
 #   K¹¹ = -i KK[½(U+ - U-)] - ½(U+ + U-) - (V+ + V-)      K²² = same with +i
 #   K²¹ = -(V+ + U- + V-)                                  K¹² = -(U+ + V+ + V-)
 # and K²¹, K¹² carry s_a s_b = -1.
 @inline function _channel_term(Cp, Cm, KY, ω, c12, a, c0, i)
-    sum_c(C, type) = complex(C[ω, c12, a, c0, 1, i, type], C[ω, c12, a, c0, 2, i, type])
+    sum_c(C, type) = complex(C[ω, c12, c0, 1, a, i, type], C[ω, c12, c0, 2, a, i, type])
     Up, Um, Vp, Vm = sum_c(Cp, 1), sum_c(Cm, 1), sum_c(Cp, 2), sum_c(Cm, 2)
     if c12 == 1 || c12 == 4
-        ky = complex(KY[ω, c12, a, c0, 1, i], KY[ω, c12, a, c0, 2, i])
+        ky = complex(KY[ω, c12, c0, 1, a, i], KY[ω, c12, c0, 2, a, i])
         (c12 == 1 ? -im : im) * ky - (Up + Um) / 2 - (Vp + Vm)
     elseif c12 == 2
         (Vp + Um + Vm)
@@ -289,9 +317,9 @@ end
 
 The channels `KJ[ω, c12, cart, c0, i] = s_a s_b K^{ab}[J]` of the ladder kernel (`c12` = (a, b),
 `s_1 = 1`, `s_2 = -1`) from the shift sums `Cp`, `Cm` = `[U; V]` of the upward and downward shifts,
-each of size `(nω, 4, 3, 2, 2, ni, 2)` (real/imaginary part, then `type` = U, V). The principal-value
-part is `K` (the spline Kramers-Kronig matrix) applied to `½(U+ - U-)`; `Y` and `KY` are real
-work arrays of size `(nω, 4, 3, 2, 2, ni)`.
+each of size `(nω, 4, 2, 2, 3, ni, 2)` (c12, c0, real/imaginary part, cart, then `type` = U, V).
+The principal-value part is `K` (the spline Kramers-Kronig matrix) applied to `½(U+ - U-)`; `Y`
+and `KY` are real work arrays of size `(nω, 4, 2, 2, 3, ni)`.
 """
 function combine_channels!(KJ, Cp, Cm, K, Y, KY)
     Y .= (view(Cp, :, :, :, :, :, :, 1) .- view(Cm, :, :, :, :, :, :, 1)) ./ 2
