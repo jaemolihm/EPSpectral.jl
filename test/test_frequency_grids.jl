@@ -105,12 +105,23 @@
         # Exact node lists: window l continues outward from the last node so far in its own steps.
         @test graded_frequency_grid([(-2.0, 2.0, 1.0), (-5.0, 5.0, 2.0), (-15.0, 15.0, 5.0)]) ==
             [-14.0, -9.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 9.0, 14.0]
-        # Asymmetric windows about the origin 1, steps 1, 2, 5: nodes 1 + p, p in -6:2:8 then 13 on the
-        # right; the left continues to -6 and the next step 5 would leave [-9, 16] on the left (-11 < -10).
+        # Asymmetric windows about the origin 1, steps 1, 2, 5: nodes 1 + p with p in -2:2, then
+        # steps of 2 out to -6 and 8, then steps of 5: 13 on the right; -11 on the left would leave [-9, 16].
         @test graded_frequency_grid([(-1.0, 3.0, 1.0), (-5.0, 9.0, 2.0), (-9.0, 16.0, 5.0)]) ==
             [-5.0, -3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 14.0]
-        # Every cell is at most the step of the window that produced it, and no node leaves its window.
-        @test maximum(diff(graded_frequency_grid([(-2.0, 2.0, 1.0), (-5.0, 5.0, 2.0), (-15.0, 15.0, 5.0)]))) == 5.0
+        # Every cell is at most the step of the innermost window holding both of its ends, and all nodes
+        # lie inside the outermost window.
+        for windows_l in ([(-2.0, 2.0, 1.0), (-5.0, 5.0, 2.0), (-15.0, 15.0, 5.0)],
+                [(-1.0, 3.0, 1.0), (-5.0, 9.0, 2.0), (-9.0, 16.0, 5.0)],
+                [(0.4, 0.6, 0.001), (0.15, 0.85, 0.02)])
+            grid_l = graded_frequency_grid(windows_l)
+            @test windows_l[end][1] - 1e-12 <= grid_l[1] && grid_l[end] <= windows_l[end][2] + 1e-12
+            for (j, cell) in enumerate(diff(grid_l))
+                dw_inner = minimum(dw for (wmin, wmax, dw) in windows_l
+                                   if wmin - 1e-12 <= grid_l[j] && grid_l[j + 1] <= wmax + 1e-12)
+                @test cell <= dw_inner + 1e-12
+            end
+        end
         windows = [(0.0, 0.1, 0.01), (-0.2, 1.0, 0.03)]
         grid3 = graded_frequency_grid(windows)
         @test all(p -> abs(p - round(p)) < 1e-8, (grid3 .- 0.05) ./ 0.01)
