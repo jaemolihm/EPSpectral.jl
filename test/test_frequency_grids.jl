@@ -95,25 +95,27 @@
 
     @testset "graded_frequency_grid" begin
         # 1 meV cells within 0.1 eV and 20 meV cells to 0.34 eV (the SrVO3 grid), written as nested
-        # windows about 0.5; the lattice is anchored at the lower end of the first window, 0.4.
+        # windows about 0.5; the origin is the centre of the first window.
         grid = graded_frequency_grid([(0.4, 0.6, 0.001), (0.15, 0.85, 0.02)])
-        @test issorted(grid) && grid[1] ≈ 0.4 - 0.24 && grid[end] ≈ 0.4 + 0.02 * 22
-        @test count(x -> 0.4 <= x <= 0.6 + 1e-12, grid) == 201
+        @test issorted(grid) && grid[1] ≈ 0.5 - 0.34 && grid[end] ≈ 0.5 + 0.34
+        @test count(x -> 0.4 <= x <= 0.6 + 1e-12, grid) == 201 && length(grid) == 201 + 24
         @test minimum(diff(grid)) ≈ 0.001 && maximum(diff(grid)) ≈ 0.02
         # The grid is commensurate with the finest step by construction, so the ladder derives it.
         @test EPSpectral.ladder_shift_step(grid, nothing) ≈ 0.001
-        # No symmetry is imposed: asymmetric windows give an asymmetric grid, on the lattice 0.1 + 0.01 ℤ
-        # (the outer window has 3x and 9x steps, and its ends are not multiples of them).
-        windows = [(0.1, 0.15, 0.01), (0.05, 0.4, 0.03), (-0.2, 1.0, 0.09)]
+        # Exact node lists: window l keeps only its points outside window l - 1. Steps 1, 2, 5 about 0.
+        @test graded_frequency_grid([(-2.0, 2.0, 1.0), (-6.0, 6.0, 2.0), (-15.0, 15.0, 5.0)]) ==
+            [-15.0, -10.0, -6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 6.0, 10.0, 15.0]
+        # Asymmetric windows about the origin 1, steps 1, 2, 5; the window ends -5, 9, -9, 16 are not all
+        # multiples of their steps (9 is a window-2 node, 16 = 1 + 15 is a window-3 node).
+        @test graded_frequency_grid([(-1.0, 3.0, 1.0), (-5.0, 9.0, 2.0), (-9.0, 16.0, 5.0)]) ==
+            [-9.0, -5.0, -3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 11.0, 16.0]
+        # A window end off the window's own nodes is not reached: origin 0.05, steps 0.01 and 0.03.
+        windows = [(0.0, 0.1, 0.01), (-0.2, 1.0, 0.03)]
         grid3 = graded_frequency_grid(windows)
-        @test all(p -> abs(p - round(p)) < 1e-8, (grid3 .- 0.1) ./ 0.01)
+        @test all(p -> abs(p - round(p)) < 1e-8, (grid3 .- 0.05) ./ 0.01)
         @test issorted(grid3) && allunique(round.(grid3; digits = 9))
-        @test all(w -> any(≈(w), grid3), (0.1, 0.15, 0.13))
-        @test grid3[1] >= -0.2 - 1e-12 && grid3[end] <= 1.0 + 1e-12 && 1.0 - grid3[end] < 0.09
+        @test grid3[1] >= -0.2 - 1e-12 && grid3[end] <= 1.0 + 1e-12 && 1.0 - grid3[end] < 0.03
         @test EPSpectral.ladder_shift_step(grid3, nothing) ≈ 0.01
-        # Exact node list of an asymmetric grid with an integer chain of steps (1, 2, 4), anchored at -2.
-        @test graded_frequency_grid([(-2.0, 2.0, 1.0), (-6.0, 6.0, 2.0), (-8.0, 14.0, 4.0)]) ==
-            [-6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 6.0, 10.0, 14.0]
         # A single window is the uniform grid.
         @test graded_frequency_grid([(-1.0, 1.0, 0.25)]) ≈ -1.0:0.25:1.0
         # A non-integer ratio, windows that are not nested, a bad window, an empty list.

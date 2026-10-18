@@ -173,15 +173,20 @@ A grid whose step grows outward, from `windows = [(wmin, wmax, dw), ...]`: windo
 non-increasing and `wmax` non-decreasing along the list, so the first window has the finest step.
 No symmetry about any point is imposed.
 
-All nodes lie on the lattice `wmin_1 + dw_1 ℤ` anchored at the lower end of the first window, as
-the ladder ([`run_scgd0_ladder`](@ref)) requires of a grid, so every ratio `dw_l / dw_1` must be
-an integer (to `1e-8`). Window `l` contributes the points `wmin_1 + dw_l ℤ` inside `[wmin_l,
-wmax_l]`; the grid is the sorted union. Throws an `ArgumentError` for an empty list, a non-positive step, a window
-with `wmin >= wmax`, windows that are not nested, or a non-integer ratio.
+Window 1 contributes its points in `[wmin_1, wmax_1]`; window `l > 1` contributes only the points
+outside window `l - 1`, i.e. in `[wmin_l, wmin_{l-1})` and `(wmax_{l-1}, wmax_l]`, on its own step
+`dw_l`. All nodes lie on `origin + dw_1 ℤ` with `origin = (wmin_1 + wmax_1) / 2`, the centre of the
+finest window, as the ladder ([`run_scgd0_ladder`](@ref)) requires of a grid; window `l` takes the
+nodes `origin + dw_l ℤ`. Every ratio `dw_l / dw_1` must therefore be an integer (to `1e-8`). Throws
+an `ArgumentError` for an empty list, a non-positive step, a window with `wmin >= wmax`, windows
+that are not nested, or a non-integer ratio.
 
 ```julia
 julia> print(graded_frequency_grid([(-2.0, 2.0, 1.0), (-6.0, 6.0, 2.0), (-15.0, 15.0, 5.0)]))
-[-12.0, -7.0, -6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 13.0]
+[-15.0, -10.0, -6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 6.0, 10.0, 15.0]
+
+julia> print(graded_frequency_grid([(-1.0, 3.0, 1.0), (-5.0, 9.0, 2.0), (-9.0, 16.0, 5.0)]))
+[-9.0, -5.0, -3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 11.0, 16.0]
 
 julia> meV = unit_to_aru(:meV); μ = 0.5;   # illustrative: 1 meV within 0.1 eV of μ, 5 meV to 0.3 eV, 20 meV to 1 eV
 
@@ -196,17 +201,28 @@ function graded_frequency_grid(windows)
     (issorted(wmins; rev = true) && issorted(wmaxs)) || throw(ArgumentError(
         "windows must be nested from the smallest to the largest (wmin non-increasing, wmax " *
         "non-decreasing), got $windows"))
-    anchor, dw1 = wmins[1], dws[1]
+    origin, dw1 = (wmins[1] + wmaxs[1]) / 2, dws[1]
+    tol = 1e-8
+    # Node p of window l sits at origin + dw1 * p, with p a multiple of r_l = dw_l / dw_1.
+    # u, v are the window ends in units of dw1 about the origin.
+    u = (wmins .- origin) ./ dw1
+    v = (wmaxs .- origin) ./ dw1
     ps = Int[]
     for l in eachindex(windows)
         ratio = dws[l] / dw1
-        abs(ratio - round(ratio)) <= 1e-8 || throw(ArgumentError(
+        abs(ratio - round(ratio)) <= tol || throw(ArgumentError(
             "dw[$l] = $(dws[l]) is not an integer multiple of dw[1] = $dw1 (ratio $ratio)"))
         r = round(Int, ratio)
-        # The lattice indices p of window l are the multiples of r with wmin <= anchor + dw1 p <= wmax.
-        p_lo = ceil(Int, (wmins[l] - anchor) / dw1 - 1e-8)
-        p_hi = floor(Int, (wmaxs[l] - anchor) / dw1 + 1e-8)
-        append!(ps, cld(p_lo, r) * r:r:p_hi)
+        if l == 1
+            # Finest window: every point in [wmin, wmax].
+            append!(ps, ceil(Int, u[1] - tol):floor(Int, v[1] + tol))
+        else
+            # Outer window: multiples of r strictly outside the previous window, up to its own ends.
+            p_lo, p_hi = ceil(Int, u[l] - tol), ceil(Int, u[l-1] - tol) - 1
+            append!(ps, cld(p_lo, r) * r:r:p_hi)
+            p_lo, p_hi = floor(Int, v[l-1] + tol) + 1, floor(Int, v[l] + tol)
+            append!(ps, cld(p_lo, r) * r:r:p_hi)
+        end
     end
-    anchor .+ dw1 .* sort!(unique!(ps))
+    origin .+ dw1 .* sort!(ps)
 end
