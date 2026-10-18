@@ -173,22 +173,23 @@ A grid whose step grows outward, from `windows = [(wmin, wmax, dw), ...]`: windo
 non-increasing and `wmax` non-decreasing along the list, so the first window has the finest step.
 No symmetry about any point is imposed.
 
-Window 1 contributes its points in `[wmin_1, wmax_1]`; window `l > 1` contributes only the points
-outside window `l - 1`, i.e. in `[wmin_l, wmin_{l-1})` and `(wmax_{l-1}, wmax_l]`, on its own step
-`dw_l`. All nodes lie on `origin + dw_1 ℤ` with `origin = (wmin_1 + wmax_1) / 2`, the centre of the
-finest window, as the ladder ([`run_scgd0_ladder`](@ref)) requires of a grid; window `l` takes the
-nodes `origin + dw_l ℤ`. Every ratio `dw_l / dw_1` must therefore be an integer (to `1e-8`). If the
-width of the finest window is an odd number of `dw_1`, it has no node at either end:
-`graded_frequency_grid([(0.0, 1.0, 0.2)])` is `0.1:0.2:0.9`. Throws an `ArgumentError` for an empty
-list, a non-positive step, a window with `wmin >= wmax`, windows
-that are not nested, or a non-integer ratio.
+Window 1 contributes its points in `[wmin_1, wmax_1]`, at least two. Window `l > 1` continues outward
+from the outermost node so far on each side in steps of `dw_l`, as long as the node stays within
+`[wmin_l, wmax_l]`; every cell is therefore at most `dw_l` wide, and the outer ends need not land on
+`wmin_l` or `wmax_l`. All nodes lie on `origin + dw_1 ℤ` with `origin = (wmin_1 + wmax_1) / 2`, the
+centre of the finest window, as the ladder ([`run_scgd0_ladder`](@ref)) requires of a grid. Every ratio
+`dw_l / dw_1` must therefore be an integer (to `1e-8`). If the width of the finest window is an odd
+number of `dw_1`, it has no node at either end: `graded_frequency_grid([(0.0, 1.0, 0.2)])` is
+`0.1:0.2:0.9`. Throws an `ArgumentError` for an empty list, a non-positive step, a window with
+`wmin >= wmax`, windows that are not nested, a non-integer ratio, or a finest window holding fewer than
+two nodes.
 
 ```julia
-julia> print(graded_frequency_grid([(-2.0, 2.0, 1.0), (-6.0, 6.0, 2.0), (-15.0, 15.0, 5.0)]))
-[-15.0, -10.0, -6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 6.0, 10.0, 15.0]
+julia> print(graded_frequency_grid([(-2.0, 2.0, 1.0), (-5.0, 5.0, 2.0), (-15.0, 15.0, 5.0)]))
+[-14.0, -9.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 9.0, 14.0]
 
 julia> print(graded_frequency_grid([(-1.0, 3.0, 1.0), (-5.0, 9.0, 2.0), (-9.0, 16.0, 5.0)]))
-[-9.0, -5.0, -3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 11.0, 16.0]
+[-5.0, -3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 14.0]
 
 julia> meV = unit_to_aru(:meV); μ = 0.5;   # illustrative: 1 meV within 0.1 eV of μ, 5 meV to 0.3 eV, 20 meV to 1 eV
 
@@ -205,7 +206,7 @@ function graded_frequency_grid(windows)
         "non-decreasing), got $windows"))
     origin, dw1 = (wmins[1] + wmaxs[1]) / 2, dws[1]
     tol = 1e-8
-    # Node p of window l sits at origin + dw1 * p, with p a multiple of r_l = dw_l / dw_1.
+    # Node p sits at origin + dw1 * p; window l steps by r_l = dw_l / dw_1.
     # u, v are the window ends in units of dw1 about the origin.
     u = (wmins .- origin) ./ dw1
     v = (wmaxs .- origin) ./ dw1
@@ -218,12 +219,13 @@ function graded_frequency_grid(windows)
         if l == 1
             # Finest window: every point in [wmin, wmax].
             append!(ps, ceil(Int, u[1] - tol):floor(Int, v[1] + tol))
+            length(ps) >= 2 || throw(ArgumentError(
+                "the finest window must hold at least two nodes, got $(length(ps)) for $(windows[1])"))
         else
-            # Outer window: multiples of r strictly outside the previous window, up to its own ends.
-            p_lo, p_hi = ceil(Int, u[l] - tol), ceil(Int, u[l-1] - tol) - 1
-            append!(ps, cld(p_lo, r) * r:r:p_hi)
-            p_lo, p_hi = floor(Int, v[l-1] + tol) + 1, floor(Int, v[l] + tol)
-            append!(ps, cld(p_lo, r) * r:r:p_hi)
+            # Outer window: continue from the outermost node so far on each side, in its own steps.
+            p_lo, p_hi = minimum(ps), maximum(ps)
+            append!(ps, p_hi + r:r:floor(Int, v[l] + tol))
+            append!(ps, p_lo - r:-r:ceil(Int, u[l] - tol))
         end
     end
     origin .+ dw1 .* sort!(ps)

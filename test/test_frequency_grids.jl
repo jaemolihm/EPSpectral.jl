@@ -102,14 +102,15 @@
         @test minimum(diff(grid)) ≈ 0.001 && maximum(diff(grid)) ≈ 0.02
         # The grid is commensurate with the finest step by construction, so the ladder derives it.
         @test EPSpectral.ladder_shift_step(grid, nothing) ≈ 0.001
-        # Exact node lists: window l keeps only its points outside window l - 1. Steps 1, 2, 5 about 0.
-        @test graded_frequency_grid([(-2.0, 2.0, 1.0), (-6.0, 6.0, 2.0), (-15.0, 15.0, 5.0)]) ==
-            [-15.0, -10.0, -6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 6.0, 10.0, 15.0]
-        # Asymmetric windows about the origin 1, steps 1, 2, 5; the window ends -5, 9, -9, 16 are not all
-        # multiples of their steps (9 is a window-2 node, 16 = 1 + 15 is a window-3 node).
+        # Exact node lists: window l continues outward from the last node so far in its own steps.
+        @test graded_frequency_grid([(-2.0, 2.0, 1.0), (-5.0, 5.0, 2.0), (-15.0, 15.0, 5.0)]) ==
+            [-14.0, -9.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 9.0, 14.0]
+        # Asymmetric windows about the origin 1, steps 1, 2, 5: nodes 1 + p, p in -6:2:8 then 13 on the
+        # right; the left continues to -6 and the next step 5 would leave [-9, 16] on the left (-11 < -10).
         @test graded_frequency_grid([(-1.0, 3.0, 1.0), (-5.0, 9.0, 2.0), (-9.0, 16.0, 5.0)]) ==
-            [-9.0, -5.0, -3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 11.0, 16.0]
-        # A window end off the window's own nodes is not reached: origin 0.05, steps 0.01 and 0.03.
+            [-5.0, -3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 14.0]
+        # Every cell is at most the step of the window that produced it, and no node leaves its window.
+        @test maximum(diff(graded_frequency_grid([(-2.0, 2.0, 1.0), (-5.0, 5.0, 2.0), (-15.0, 15.0, 5.0)]))) == 5.0
         windows = [(0.0, 0.1, 0.01), (-0.2, 1.0, 0.03)]
         grid3 = graded_frequency_grid(windows)
         @test all(p -> abs(p - round(p)) < 1e-8, (grid3 .- 0.05) ./ 0.01)
@@ -120,6 +121,9 @@
         @test graded_frequency_grid([(-1.0, 1.0, 0.25)]) ≈ -1.0:0.25:1.0
         # A single window of odd width in steps has no node at its ends: the origin is its centre.
         @test graded_frequency_grid([(0.0, 1.0, 0.2)]) ≈ 0.1:0.2:0.9
+        # A finest window with fewer than two nodes (here one: 0.1 / 0.2 holds only the origin).
+        @test_throws ArgumentError graded_frequency_grid([(0.0, 0.1, 0.2)])
+        @test_throws ArgumentError graded_frequency_grid([(0.0, 0.1, 0.2), (-1.0, 1.0, 0.4)])
         # A non-integer ratio, windows that are not nested, a bad window, an empty list.
         @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-3.0, 3.0, 0.025)])
         @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-0.5, 3.0, 0.02)])
