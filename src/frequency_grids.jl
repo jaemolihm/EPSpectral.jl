@@ -174,6 +174,15 @@ A grid symmetric about `center` whose step grows outward: `steps[l]` applies out
 so the grid is commensurate with `steps[1]` by construction, as the ladder
 ([`run_scgd0_ladder`](@ref)) requires. Every ratio `steps[l] / steps[1]` must be an integer (to
 `1e-8`). The outermost node is the largest kept multiple not beyond `half_widths[end]`.
+
+```julia
+julia> print(graded_frequency_grid(0.0, [1.0, 2.0, 5.0], [2.0, 6.0, 15.0]))
+[-15.0, -10.0, -6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 6.0, 10.0, 15.0]
+
+julia> meV = unit_to_aru(:meV);   # 1 meV within 0.1 eV of μ, 5 meV to 0.3 eV, 20 meV to 1 eV
+
+julia> ωs = graded_frequency_grid(μ, [1, 5, 20] .* meV, [100, 300, 1000] .* meV);
+```
 """
 function graded_frequency_grid(center, steps, half_widths)
     length(steps) == length(half_widths) || throw(ArgumentError(

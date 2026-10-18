@@ -51,7 +51,10 @@ again for the same `model`, `nk` and `window`, which must give the same states a
 `ωs = scgd0.ωs` must be commensurate with the shift step `dω_shift` (every node on
 `ωs[1] + dω_shift ℤ`); the cost grows as `1 / dω_shift`. `dω_shift = nothing` takes the largest such
 step, `minimum(diff(ωs)) / k` with the smallest `k <= 64` ([`ladder_shift_step`](@ref)); an explicit
-value is checked. [`graded_frequency_grid`](@ref) builds commensurate graded grids. `occ` supplies
+value is checked. Keep the default: on a commensurate `ωs` a finer step gives the same σ
+except for the one-step tail of a nonzero vertex at the end nodes, at a cost `∝ 1 / dω_shift`;
+pass `dω_shift` only to check that tail (`h` against `h / 2`) or in tests.
+[`graded_frequency_grid`](@ref) builds commensurate graded grids. `occ` supplies
 `spin_degeneracy` and `volume`, and its `Tlist` must equal `scgd0.Tlist`.
 The linear problem is solved for each `(T, Ω)` in turn by
 `solver = :gmres` (warm-started from the previous `Ω` at the same `T`; residual below `rtol` times
