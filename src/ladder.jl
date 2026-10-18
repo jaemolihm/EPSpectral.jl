@@ -39,7 +39,7 @@ end
 
 """
     run_scgd0_ladder(model, nk, window, scgd0::SCGD0Result; occ, Ωs = [0.0], solver = :gmres,
-        rtol = 1e-2, maxiter = 30, dω_shift = nothing, store_vertex = false,
+        rtol = 1e-2, maxiter = 30, store_vertex = false,
         kwargs...) -> SCGD0LadderResult
 
 The electron-only Kubo conductivity at every temperature of `scgd0` and every probe frequency
@@ -48,13 +48,10 @@ by the ladder of the scGD0 coupling, `J = J0 + L(J)` on the 2x2 Keldysh contour 
 Self-energy, chemical potential and temperatures come from `scgd0`; the e-ph coupling is extracted
 again for the same `model`, `nk` and `window`, which must give the same states as `scgd0.el_i`.
 
-`ωs = scgd0.ωs` must be commensurate with the shift step `dω_shift` (every node on
-`ωs[1] + dω_shift ℤ`); the cost grows as `1 / dω_shift`. `dω_shift = nothing` takes the largest such
-step, `minimum(diff(ωs)) / k` with the smallest `k <= 64` ([`ladder_shift_step`](@ref)); an explicit
-value is checked. Keep the default: on a commensurate `ωs` a finer step gives the same σ
-except for the one-step tail of a nonzero vertex at the end nodes, at a cost `∝ 1 / dω_shift`;
-pass `dω_shift` only to check that tail (`h` against `h / 2`) or in tests.
-[`graded_frequency_grid`](@ref) builds commensurate graded grids. `occ` supplies
+`ωs = scgd0.ωs` must be commensurate with the shift step `dω_shift`, which is derived from it: the
+largest step `minimum(diff(ωs)) / k` with the smallest `k <= 64` on which every node lies on
+`ωs[1] + dω_shift ℤ` ([`ladder_shift_step`](@ref)); the cost grows as `1 / dω_shift`. The step used
+is returned in the result. [`graded_frequency_grid`](@ref) builds commensurate graded grids. `occ` supplies
 `spin_degeneracy` and `volume`, and its `Tlist` must equal `scgd0.Tlist`.
 The linear problem is solved for each `(T, Ω)` in turn by
 `solver = :gmres` (warm-started from the previous `Ω` at the same `T`; residual below `rtol` times
@@ -68,7 +65,7 @@ per chunk, rounded up to whole stars), `ω_acoustic`, `electron_degen_cutoff`; t
 """
 function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
         occ::ElectronOccupationParams, Ωs = [zero(FT)], solver = :gmres, rtol = 1e-2, maxiter = 30,
-        dω_shift = nothing, store_vertex = false, backend = CPUBackend(),
+        store_vertex = false, backend = CPUBackend(),
         symmetry = model.symmetry, gpu_tile = nothing, verbosity = 1,
         ω_acoustic = ElectronPhonon.omega_acoustic,
         electron_degen_cutoff = ElectronPhonon.electron_degen_cutoff, ep_kwargs...) where {FT}
@@ -88,7 +85,7 @@ function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
      isapprox(el_new.es, el_old.es; rtol = 1e-10)) || throw(ArgumentError(
         "the states of the new extraction differ from scgd0.el_i: run_scgd0_ladder needs the " *
         "same model, nk, window and symmetry as the run that produced scgd0"))
-    ladder = _setup_ladder(setup, scgd0, symmetry; dω_shift, backend, verbosity)
+    ladder = _setup_ladder(setup, scgd0, symmetry; backend, verbosity)
     res = _loop_ladder(ladder, scgd0.Σ, scgd0.μ, scgd0.Tlist, collect(FT, Ωs); solver, rtol,
         maxiter, store_vertex, backend, gpu_tile, ω_acoustic, verbosity)
 
@@ -111,9 +108,9 @@ end
 # a dense array) and the inner states grouped by representative, the hat-basis shift tables on the
 # commensurate `ωs` (`nshift` tables of step `dω_shift`, the last one always zero), the quadrature
 # weights and the band velocities v[cart, i]. `dω_shift = nothing` derives the step
-# ([`ladder_shift_step`](@ref)).
+# ([`ladder_shift_step`](@ref)); an explicit one is checked.
 # `symmetry === nothing` has no rotation.
-function _setup_ladder(setup, scgd0, symmetry; dω_shift, backend, verbosity = 0)
+function _setup_ladder(setup, scgd0, symmetry; dω_shift = nothing, backend, verbosity = 0)
     (; el_i, el_f, ωph) = setup
     FT = eltype(setup.g2)
     ωs = scgd0.ωs
