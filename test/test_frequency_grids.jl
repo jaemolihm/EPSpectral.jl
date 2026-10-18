@@ -94,23 +94,31 @@
     end
 
     @testset "graded_frequency_grid" begin
-        # 1 meV cells within 0.1 eV and 20 meV cells to 0.34 eV: the SrVO3 grid, symmetric, with
-        # the outermost node the largest multiple of 20 meV not beyond 0.35.
-        grid = graded_frequency_grid(0.5, (0.001, 0.02), (0.1, 0.35))
-        @test length(grid) == 201 + 2 * 12 && grid[1] ≈ 0.5 - 0.34 && grid[end] ≈ 0.5 + 0.34
-        @test grid ≈ 1.0 .- reverse(grid) && issorted(grid)
+        # 1 meV cells within 0.1 eV and 20 meV cells to 0.34 eV (the SrVO3 grid), written as nested
+        # windows about 0.5; the lattice is anchored at the lower end of the first window, 0.4.
+        grid = graded_frequency_grid([(0.4, 0.6, 0.001), (0.15, 0.85, 0.02)])
+        @test issorted(grid) && grid[1] ≈ 0.4 - 0.24 && grid[end] ≈ 0.4 + 0.02 * 22
+        @test count(x -> 0.4 <= x <= 0.6 + 1e-12, grid) == 201
         @test minimum(diff(grid)) ≈ 0.001 && maximum(diff(grid)) ≈ 0.02
         # The grid is commensurate with the finest step by construction, so the ladder derives it.
         @test EPSpectral.ladder_shift_step(grid, nothing) ≈ 0.001
-        # Three regions whose transitions (0.05, 0.3) are not multiples of the next step: the nodes
-        # stay on center + steps[1] p.
-        grid3 = graded_frequency_grid(0.0, (0.01, 0.03, 0.09), (0.05, 0.3, 0.9))
-        @test all(p -> abs(p - round(p)) < 1e-8, grid3 ./ 0.01)
+        # No symmetry is imposed: asymmetric windows give an asymmetric grid, on the lattice 0.1 + 0.01 ℤ
+        # (the outer window has 3x and 9x steps, and its ends are not multiples of them).
+        windows = [(0.1, 0.15, 0.01), (0.05, 0.4, 0.03), (-0.2, 1.0, 0.09)]
+        grid3 = graded_frequency_grid(windows)
+        @test all(p -> abs(p - round(p)) < 1e-8, (grid3 .- 0.1) ./ 0.01)
+        @test issorted(grid3) && allunique(round.(grid3; digits = 9))
+        @test all(w -> any(≈(w), grid3), (0.1, 0.15, 0.13))
+        @test grid3[1] >= -0.2 - 1e-12 && grid3[end] <= 1.0 + 1e-12 && 1.0 - grid3[end] < 0.09
         @test EPSpectral.ladder_shift_step(grid3, nothing) ≈ 0.01
-        @test grid3[end] ≈ 0.9 && 0.05 in grid3
-        # A ratio that is not an integer, unordered widths and mismatched lengths error.
-        @test_throws ArgumentError graded_frequency_grid(0.0, (0.01, 0.025), (0.1, 0.3))
-        @test_throws ArgumentError graded_frequency_grid(0.0, (0.01, 0.02), (0.3, 0.1))
-        @test_throws ArgumentError graded_frequency_grid(0.0, (0.01, 0.02), (0.1,))
+        # A single window is the uniform grid.
+        @test graded_frequency_grid([(-1.0, 1.0, 0.25)]) ≈ -1.0:0.25:1.0
+        # A non-integer ratio, windows that are not nested, a bad window, an empty list.
+        @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-3.0, 3.0, 0.025)])
+        @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-0.5, 3.0, 0.02)])
+        @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-3.0, 0.5, 0.02)])
+        @test_throws ArgumentError graded_frequency_grid([(1.0, -1.0, 0.01)])
+        @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.0)])
+        @test_throws ArgumentError graded_frequency_grid([])
     end
 end

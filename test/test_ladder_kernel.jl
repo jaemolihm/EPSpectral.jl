@@ -102,7 +102,7 @@ end
         eV = 1 / 13.605693122994
         center = 11.83 * eV
         for grid in (collect(center .+ (-2eV:1e-4eV:2eV)),
-                graded_frequency_grid(center, (1e-4eV, 2e-3eV), (0.1eV, 1eV)))
+                graded_frequency_grid([(center - 0.1eV, center + 0.1eV, 1e-4eV), (center - 1eV, center + 1eV, 2e-3eV)]))
             @test EPSpectral.ladder_shift_step(grid, nothing) ≈ 1e-4eV rtol = 1e-6
             @test EPSpectral.ladder_shift_step(grid, 1e-4eV) == 1e-4eV
         end
@@ -241,27 +241,26 @@ end
         @test EPSpectral.ladder_shift_step(ωs_k2, nothing) ≈ 5e-3 * eV
         out_k2 = run(res_k2)
         @test out_k2.dω_shift ≈ 5e-3 * eV
-        # An explicit minimum step is not on the lattice: the error names the compatible step.
-        err = try; run(res_k2; dω_shift = 10e-3 * eV); catch e; e; end
+        # An explicit step (the internal check of `ladder_shift_step`) at the minimum step is not on
+        # the lattice: the error names the compatible step.
+        err = try; EPSpectral.ladder_shift_step(ωs_k2, 10e-3 * eV); catch e; e; end
         @test err isa ArgumentError && occursin("is compatible", err.msg)
         # A coarse step with no lattice at any k <= 64 is an error with or without an explicit step.
         res_bad = with_ωs(11.83 * eV .+ vcat(-1.2:0.0452123:-0.25, -0.24:0.02:0.24, 0.25:0.0452123:1.2) .* eV)
-        for kwargs in ((;), (; dω_shift = 10e-3 * eV))
-            err = try; run(res_bad; kwargs...); catch e; e; end
+        for call in (() -> run(res_bad), () -> EPSpectral.ladder_shift_step(res_bad.ωs, 10e-3 * eV))
+            err = try; call(); catch e; e; end
             @test err isa ArgumentError
             @test occursin("not commensurate", err.msg) && occursin("No step", err.msg)
         end
         @info "non-commensurate message" err.msg
 
-        # The derived default is the minimum step on a grid whose lattice it is, so it equals the
-        # explicit minimum step bitwise.
+        # The derived step is the minimum step on a grid whose lattice it is, and the result reports it.
         for case in (pb, holstein_ladder_case(; nk = 8))
-            run_case(res_case; kwargs...) = run_scgd0_ladder(case.model, case.nk, case.window, res_case;
-                case.occ, Ωs = [0.0], verbosity = 0, rtol = 1e-6, kwargs...)
-            derived = run_case(case.res)
-            explicit = run_case(case.res; dω_shift = minimum(diff(case.ωs)))
-            @test derived.dω_shift == minimum(diff(case.ωs))
-            @test derived.σ_ladder == explicit.σ_ladder && derived.niter == explicit.niter
+            derived = run_scgd0_ladder(case.model, case.nk, case.window, case.res; case.occ,
+                Ωs = [0.0], verbosity = 0, rtol = 1e-6)
+            @test derived.dω_shift == minimum(diff(case.ωs)) == case.dω_shift
+            # An explicit minimum step passes the check and is the derived one.
+            @test EPSpectral.ladder_shift_step(case.ωs, minimum(diff(case.ωs))) == derived.dω_shift
         end
 
         # The same hat-basis shifts on a table twice as fine: one application on a vertex that
@@ -278,10 +277,14 @@ end
         LJ, LJ_half = (apply_ladder_case(case, J_ends, 1, 0.123 * eV) for case in (pb, pb_half))
         @info "end-value dependence of one application on the shift step" norm(LJ_half - LJ) / norm(LJ)
 
-        # The solve on the finer table is the same problem; σ differs by the end tails only.
-        a = run(res; rtol = 1e-10, maxiter = 60)
-        b = run(res; dω_shift = pb.dω_shift / 2, rtol = 1e-10, maxiter = 60)
-        @test a.dω_shift == pb.dω_shift && b.dω_shift == pb.dω_shift / 2
-        @info "σ_ladder on the step h and h/2" norm(b.σ_ladder - a.σ_ladder) / norm(a.σ_ladder)
+        # The solve on the finer table is the same problem; σ differs by the end tails only. The
+        # run derives the step, so the finer table is run through the loop on its own setup.
+        derived = run(res; rtol = 1e-10, maxiter = 60)
+        @test derived.dω_shift == pb.dω_shift && pb_half.dω_shift == pb.dω_shift / 2
+        run_loop(case) = EPSpectral._loop_ladder(case.ladder, res.Σ, res.μ, res.Tlist, [0.0];
+            solver = :gmres, rtol = 1e-10, maxiter = 60, store_vertex = false, backend = EP.CPUBackend(),
+            gpu_tile = nothing, ω_acoustic = EP.omega_acoustic, verbosity = 0)
+        σ, σ_half = (run_loop(case).σ_ladder for case in (pb, pb_half))
+        @info "σ_ladder on the step h and h/2" norm(σ_half - σ) / norm(σ)
     end
 end
