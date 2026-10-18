@@ -118,6 +118,8 @@
         @test EPSpectral.ladder_shift_step(grid3, nothing) ≈ 0.01
         # A single window is the uniform grid.
         @test graded_frequency_grid([(-1.0, 1.0, 0.25)]) ≈ -1.0:0.25:1.0
+        # A single window of odd width in steps has no node at its ends: the origin is its centre.
+        @test graded_frequency_grid([(0.0, 1.0, 0.2)]) ≈ 0.1:0.2:0.9
         # A non-integer ratio, windows that are not nested, a bad window, an empty list.
         @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-3.0, 3.0, 0.025)])
         @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-0.5, 3.0, 0.02)])
