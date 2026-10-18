@@ -327,11 +327,11 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
         apply_interpolation_table!(Σd, Σ_T, to_device(backend, j), to_device(backend, t))
     end
 
-    for iT in 1:nT
+    @views for iT in 1:nT
         T = Tlist[iT]
         for (iΩ, Ω) in enumerate(Ωs)
             t0 = time()
-            Σ_T = view(Σ_dev, :, :, iT)
+            Σ_T = Σ_dev[:, :, iT]
             shifted_Σ!(Σd_m, Σ_T, Array(ωs) .- Ω / 2)
             shifted_Σ!(Σd_p, Σ_T, Array(ωs) .+ Ω / 2)
             contour_greens!(Gm, Gp, ε_i, Σd_m, Σd_p, ωs, Ω, μ[iT], T)

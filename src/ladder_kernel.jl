@@ -116,7 +116,7 @@ with `-∂f/∂ω` in place of the last factor at `Ω = 0`.
 function conductivity_from_vertex(J, v, w_i, Wω, Ω, T)
     F = iszero(Ω) ? im / (4T) : -1 / (2im * Ω * (1 + 2 * occ_boson(Ω, T)))
     # Y[b, i] = Σ_ω Wω[ω] (J_ib^{22,c0=1} + J_ib^{11,c0=2})(ω)
-    Y = sum(reshape(Wω, :, 1, 1) .* (view(J, :, 4, :, 1, :) .+ view(J, :, 1, :, 2, :)); dims = 1)
+    Y = @views sum(reshape(Wω, :, 1, 1) .* (J[:, 4, :, 1, :] .+ J[:, 1, :, 2, :]); dims = 1)
     S = (conj.(v) .* reshape(w_i, 1, :)) * transpose(reshape(Y, size(Y, 2), size(Y, 3)))
     real.(F / (2π * im) .* Array(S))
 end
@@ -289,11 +289,11 @@ function bin_coupling_on_shift_grid!(B, g2, fidx, ωq, nB, w_f, dω_shift, ω_ac
     # The sink of the side-effecting broadcast below: 1 / (8 nshift) of the size of B, so a per-call
     # allocation from the pool costs nothing next to the fill of B.
     done = similar(B, Bool, size(B, 2), size(B, 3), size(B, 4))
-    _threaded_on_host(B, axes(B, 2)) do fs
-        fill!(view(B, :, fs, :, :), 0)
-        view(done, fs, :, :) .= _add_modes_to_coupling!.(Ref(B), Ref(g2), Ref(fidx), Ref(ωq), Ref(nB),
+    @views _threaded_on_host(B, axes(B, 2)) do fs
+        B[:, fs, :, :] .= 0
+        done[fs, :, :] .= _add_modes_to_coupling!.(Ref(B), Ref(g2), Ref(fidx), Ref(ωq), Ref(nB),
             dω_shift, ω_acoustic, reshape(fs, :, 1, 1), i, type)
-        view(B, :, fs, :, :) .*= reshape(view(w_f, fs), 1, :, 1, 1)
+        B[:, fs, :, :] .*= reshape(w_f[fs], 1, :, 1, 1)
     end
     B
 end
@@ -319,8 +319,8 @@ positions `star_ptr[ip]:star_ptr[ip + 1] - 1`).
 """
 function star_sum_coupling!(Bt, B, R, fidx, star_ptr)
     m, b, _, a, i, type = _broadcast_axes(Bt)
-    _threaded_on_host(Bt, axes(Bt, 3)) do ips
-        view(Bt, :, :, ips, :, :, :) .= _star_sum_coupling_term.(Ref(B), Ref(R), Ref(fidx), Ref(star_ptr),
+    @views _threaded_on_host(Bt, axes(Bt, 3)) do ips
+        Bt[:, :, ips, :, :, :] .= _star_sum_coupling_term.(Ref(B), Ref(R), Ref(fidx), Ref(star_ptr),
             m, b, reshape(ips, 1, 1, :, 1, 1, 1), a, i, type)
     end
     Bt
@@ -343,8 +343,8 @@ of one sign: `klo`, `wlo`, `whi` of size `(nω, nshift)` ([`vertex_shift_tables`
 """
 function gather_shifted_vertex!(X, J, klo, wlo, whi, i1)
     j, c12, c0, ri, m, b, _ = _broadcast_axes(X)
-    _threaded_on_host(X, axes(X, 7)) do ips
-        view(X, :, :, :, :, :, :, ips) .= _shifted_vertex_term.(Ref(J), Ref(klo), Ref(wlo),
+    @views _threaded_on_host(X, axes(X, 7)) do ips
+        X[:, :, :, :, :, :, ips] .= _shifted_vertex_term.(Ref(J), Ref(klo), Ref(wlo),
             Ref(whi), i1, j, c12, c0, ri, m, b, reshape(ips, 1, 1, 1, 1, 1, 1, :))
     end
     X
@@ -379,7 +379,7 @@ The principal-value part is `KK` (the spline Kramers-Kronig matrix) applied to `
 and `KY` are real work arrays of size `(nω, 4, 2, 2, 3, ni)`.
 """
 function apply_phonon_exchange_kernel!(KJ, Cp, Cm, KK, Y, KY)
-    Y .= (view(Cp, :, :, :, :, :, :, 1) .- view(Cm, :, :, :, :, :, :, 1)) ./ 2
+    @views Y .= (Cp[:, :, :, :, :, :, 1] .- Cm[:, :, :, :, :, :, 1]) ./ 2
     mul!(reshape(KY, size(KY, 1), :), KK, reshape(Y, size(Y, 1), :))
     KJ .= _apply_phonon_exchange_kernel_term.(Ref(Cp), Ref(Cm), Ref(KY), _broadcast_axes(KJ)...)
 end
