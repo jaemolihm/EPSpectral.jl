@@ -177,8 +177,10 @@ Window 1 contributes its points in `[wmin_1, wmax_1]`; window `l > 1` contribute
 outside window `l - 1`, i.e. in `[wmin_l, wmin_{l-1})` and `(wmax_{l-1}, wmax_l]`, on its own step
 `dw_l`. All nodes lie on `origin + dw_1 ℤ` with `origin = (wmin_1 + wmax_1) / 2`, the centre of the
 finest window, as the ladder ([`run_scgd0_ladder`](@ref)) requires of a grid; window `l` takes the
-nodes `origin + dw_l ℤ`. Every ratio `dw_l / dw_1` must therefore be an integer (to `1e-8`). Throws
-an `ArgumentError` for an empty list, a non-positive step, a window with `wmin >= wmax`, windows
+nodes `origin + dw_l ℤ`. Every ratio `dw_l / dw_1` must therefore be an integer (to `1e-8`). If the
+width of the finest window is an odd number of `dw_1`, it has no node at either end:
+`graded_frequency_grid([(0.0, 1.0, 0.2)])` is `0.1:0.2:0.9`. Throws an `ArgumentError` for an empty
+list, a non-positive step, a window with `wmin >= wmax`, windows
 that are not nested, or a non-integer ratio.
 
 ```julia
