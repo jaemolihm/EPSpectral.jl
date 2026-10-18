@@ -354,7 +354,8 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
                 x, stats = Krylov.gmres(args...; atol = FT(rtol) * norm(J0), rtol = zero(FT),
                     itmax = maxiter, history = true)
                 copyto!(vec(J), x)
-                converged[iΩ, iT], niter[iΩ, iT] = stats.solved, stats.niter
+                converged[iΩ, iT] = stats.solved
+                niter[iΩ, iT] = stats.niter
                 history[iΩ, iT] = (; norms = FT.(stats.residuals), σ_iter = Matrix{FT}[])
             else
                 # J ← J0 + L(J) from J0; stop when σ changes by less than rtol (not at iteration 1).
