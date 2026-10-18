@@ -111,6 +111,9 @@
         @test all(w -> any(≈(w), grid3), (0.1, 0.15, 0.13))
         @test grid3[1] >= -0.2 - 1e-12 && grid3[end] <= 1.0 + 1e-12 && 1.0 - grid3[end] < 0.09
         @test EPSpectral.ladder_shift_step(grid3, nothing) ≈ 0.01
+        # Exact node list of an asymmetric grid with an integer chain of steps (1, 2, 4), anchored at -2.
+        @test graded_frequency_grid([(-2.0, 2.0, 1.0), (-6.0, 6.0, 2.0), (-8.0, 14.0, 4.0)]) ==
+            [-6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 6.0, 10.0, 14.0]
         # A single window is the uniform grid.
         @test graded_frequency_grid([(-1.0, 1.0, 0.25)]) ≈ -1.0:0.25:1.0
         # A non-integer ratio, windows that are not nested, a bad window, an empty list.

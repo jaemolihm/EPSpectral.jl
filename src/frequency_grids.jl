@@ -176,15 +176,14 @@ No symmetry about any point is imposed.
 All nodes lie on the lattice `wmin_1 + dw_1 ℤ` anchored at the lower end of the first window, as
 the ladder ([`run_scgd0_ladder`](@ref)) requires of a grid, so every ratio `dw_l / dw_1` must be
 an integer (to `1e-8`). Window `l` contributes the points `wmin_1 + dw_l ℤ` inside `[wmin_l,
-wmax_l]`; the grid is the sorted union, and the outermost node of a window is the last such point
-not beyond its `wmax`. Throws an `ArgumentError` for an empty list, a non-positive step, a window
+wmax_l]`; the grid is the sorted union. Throws an `ArgumentError` for an empty list, a non-positive step, a window
 with `wmin >= wmax`, windows that are not nested, or a non-integer ratio.
 
 ```julia
 julia> print(graded_frequency_grid([(-2.0, 2.0, 1.0), (-6.0, 6.0, 2.0), (-15.0, 15.0, 5.0)]))
 [-12.0, -7.0, -6.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 13.0]
 
-julia> meV = unit_to_aru(:meV);   # 1 meV within 0.1 eV of μ, 5 meV to 0.3 eV, 20 meV to 1 eV
+julia> meV = unit_to_aru(:meV); μ = 0.5;   # illustrative: 1 meV within 0.1 eV of μ, 5 meV to 0.3 eV, 20 meV to 1 eV
 
 julia> ωs = graded_frequency_grid([(μ - w * meV, μ + w * meV, dw * meV) for (w, dw) in ((100, 1), (300, 5), (1000, 20))]);
 ```
