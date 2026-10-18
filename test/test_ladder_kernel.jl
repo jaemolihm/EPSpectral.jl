@@ -12,7 +12,7 @@ end
 
 # L(J) = -Gm (s ⊙ K[J]) Gp by loops, with the channel sums of `apply_phonon_exchange_kernel!`.
 function naive_apply_ladder(ladder, J, Gm, Gp, T, ω_acoustic)
-    (; g2, ωph, iq_kk, iks_i, iks_f, w_f, f_to_i, R, ωs, K) = ladder
+    (; g2, ωph, iq_kk, iks_i, iks_f, w_f, f_to_i, R, ωs, KK) = ladder
     nm, ni, nf = size(g2)
     nω = length(ωs)
     ωq = zeros(nm, nf, ni)
@@ -37,7 +37,7 @@ function naive_apply_ladder(ladder, J, Gm, Gp, T, ω_acoustic)
             Vm[j, c12, a, c0, i] += n * um
         end
     end
-    KY = reshape(K * reshape((Up .- Um) ./ 2, nω, :), size(Up))
+    KY = reshape(KK * reshape((Up .- Um) ./ 2, nω, :), size(Up))
     LJ = zeros(ComplexF64, nω, 4, 3, 2, ni)
     s = [1 -1; -1 1]
     for i in 1:ni, c0 in 1:2, a in 1:3, j in 1:nω

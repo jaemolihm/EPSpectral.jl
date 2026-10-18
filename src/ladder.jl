@@ -229,7 +229,7 @@ combination ([`apply_phonon_exchange_kernel!`](@ref)). `ladder` is the output of
 `workspace` that of `_ladder_workspace`. Modes below `ω_acoustic` are skipped.
 """
 @views function apply_ladder_kernel!(LJ, J, ladder, workspace, Gm, Gp, T; ω_acoustic)
-    (; g2, ωph, iq_kk, iks_i, R, klo, wlo, whi, K, ωs, M, dω_shift) = ladder
+    (; g2, ωph, iq_kk, iks_i, R, klo, wlo, whi, KK, ωs, M, dω_shift) = ladder
     (; chunks, streamed, g2_dev, g2_stage, ωq_buf, nB_buf, B_buf, Bt_buf, X_buf, Cp, Cm, Y, KY, KJ) =
         workspace
     nm, ni, _ = size(g2)
@@ -272,7 +272,7 @@ combination ([`apply_phonon_exchange_kernel!`](@ref)). `ladder` is the output of
         end
     end
     apply_phonon_exchange_kernel!(KJ, reshape(Cp, nω, 4, 2, 2, 3, ni, 2), reshape(Cm, nω, 4, 2, 2, 3, ni, 2),
-        K, Y, KY)
+        KK, Y, KY)
     attach_greens_to_vertex!(LJ, Gm, KJ, Gp)
     LJ .*= -1
 end

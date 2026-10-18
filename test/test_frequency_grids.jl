@@ -56,7 +56,7 @@
         @test Y[1, :] == y[1, :] && Y[n_out, :] == y[end, :]
     end
 
-    @testset "bucket_table, _interp_linear_grid" begin
+    @testset "cell_search_table, _interp_linear_grid" begin
         # The cell search finds the cell `searchsortedlast` does, so the lookup is bitwise the one
         # with a bisection, on the nodes and their neighbouring floats, outside both ends, at the
         # last node and at a NaN (the first value).
@@ -70,9 +70,9 @@
         end
         function same_as_bisection(ωs, xs)
             Σin = pseudorandom_complex(length(ωs), 2; seed = 4)
-            buckets = EPSpectral.bucket_table(EP.CPUBackend(), ωs)
+            cell_table = EPSpectral.cell_search_table(EP.CPUBackend(), ωs)
             all(isequal(lookup_bisection(Σin, col, x, ωs),
-                        EPSpectral._interp_linear_grid(Σin, col, x, ωs, buckets))
+                        EPSpectral._interp_linear_grid(Σin, col, x, ωs, cell_table))
                 for col in axes(Σin, 2), x in vcat(xs, nextfloat.(ωs), prevfloat.(ωs), NaN))
         end
         @test same_as_bisection(ωs, xs)
@@ -80,15 +80,15 @@
         ωg = vcat(-1.0:0.5:-0.5, -0.499:1e-3:-0.4, 0.1:0.5:1.0)
         @test same_as_bisection(ωg, range(-1.2, 1.2; length = 20001))
         # The table has one entry per bucket, so its size follows the finest cell.
-        @test length(EPSpectral.bucket_table(EP.CPUBackend(), ωg).jtab) <= (ωg[end] - ωg[1]) / (0.999e-3) + 2
+        @test length(EPSpectral.cell_search_table(EP.CPUBackend(), ωg).jtab) <= (ωg[end] - ωg[1]) / (0.999e-3) + 2
         # A near-coincident pair of nodes would need a huge table: refused, not allocated.
-        @test_throws ArgumentError EPSpectral.bucket_table(EP.CPUBackend(), [0.0, 1.0, 1.0 + 1e-9, 2.0])
+        @test_throws ArgumentError EPSpectral.cell_search_table(EP.CPUBackend(), [0.0, 1.0, 1.0 + 1e-9, 2.0])
         # Against Interpolations on the nonuniform grid.
         Σin = pseudorandom_complex(length(ωs), 3; seed = 4)
-        buckets = EPSpectral.bucket_table(EP.CPUBackend(), ωs)
+        cell_table = EPSpectral.cell_search_table(EP.CPUBackend(), ωs)
         for col in axes(Σin, 2)
             f = itp(Σin[:, col])
-            err = maximum(abs(EPSpectral._interp_linear_grid(Σin, col, x, ωs, buckets) - f(x)) for x in xs)
+            err = maximum(abs(EPSpectral._interp_linear_grid(Σin, col, x, ωs, cell_table) - f(x)) for x in xs)
             @test err <= 1e-13 * maximum(abs, Σin)
         end
     end

@@ -134,7 +134,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
     end
     length(group) > 1 && push!(multiplets, group)
 
-    ωs_buckets = bucket_table(backend, collect(FT, ωs))
+    ωs_cell_table = cell_search_table(backend, collect(FT, ωs))
     ωs_dense = range(extrema(ωs)...; step = dω_dense)
     j_dense, t_dense = linear_interpolation_table(ωs, ωs_dense)
 
@@ -152,9 +152,9 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs, dω_dense, backend
        ε_f = to_device(backend, el_f.es), w_f = to_device(backend, state_weights(el_f)),
        f_to_i = to_device(backend, f_to_i), W = sum(state_weights(el_i)),
        nstates_base = el_i.nstates_base, multiplets,
-       ωs = to_device(backend, collect(FT, ωs)), ωs_buckets, ωs_dense,
+       ωs = to_device(backend, collect(FT, ωs)), ωs_cell_table, ωs_dense,
        j_dense = to_device(backend, j_dense), t_dense = to_device(backend, t_dense),
-       K = to_device(backend, kramers_kronig_matrix(ωs)), μ_start)
+       KK = to_device(backend, kramers_kronig_matrix(ωs)), μ_start)
 end
 
 # The scGD0 iteration on `setup` (see `_setup_scgd0`; the fields read here can also be built by
@@ -163,7 +163,7 @@ end
 function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, Σ_init, fix_μ,
         ω_acoustic, verbosity)
     (; g2, ωph, iq_kk, iks_i, iks_f, ε_i, w_i, ε_f, w_f, f_to_i, W, nstates_base, multiplets, ωs,
-       ωs_buckets, ωs_dense, j_dense, t_dense, K) = setup
+       ωs_cell_table, ωs_dense, j_dense, t_dense, KK) = setup
     FT = eltype(g2)
     nm, ni, nf = size(g2)
     nω, nωd, nT = length(ωs), length(ωs_dense), length(occ)
@@ -191,7 +191,7 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     ReΣ = alloc(backend, FT, nω, ni)
     A = alloc(backend, FT, nωd, ni)                    # spectral functions A_i(ωd)
     D = alloc(backend, FT, nωd)                        # D_T(ωd) = Σ_i w_i A_i(ωd) dωd
-    # One chunk of ωq and of g2 in the (ν f, i) layout of `fm_imsigma_tile!`, flat so that a
+    # One chunk of ωq and of g2 in the (ν f, i) layout of `add_fan_migdal_imsigma!`, flat so that a
     # shorter last chunk is a contiguous prefix.
     ωq_buf = alloc(backend, FT, nm * nf_chunk * ni)
     g2p_buf = alloc(backend, FT, nm * nf_chunk * ni)
@@ -253,15 +253,15 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
             permutedims!(g2_t, g2_slab, (1, 3, 2))
             νfs = nm * (first(fs) - 1) + 1:nm * last(fs)
             for iT in iTs
-                fm_imsigma_tile!(ImΣ[:, :, iT], reshape(g2_t, nνf, ni),
-                    reshape(ωq_t, nνf, ni), ωs, ωs_buckets, ε_νf[νfs], f_to_i_νf[νfs],
+                add_fan_migdal_imsigma!(ImΣ[:, :, iT], reshape(g2_t, nνf, ni),
+                    reshape(ωq_t, nνf, ni), ωs, ωs_cell_table, ε_νf[νfs], f_to_i_νf[νfs],
                     Σin[:, :, iT], μ[iT], occ.Tlist[iT], w_νf[νfs],
                     ω_acoustic)
             end
         end
         # 4. Re Σ by Kramers-Kronig.
         for iT in iTs
-            mul!(ReΣ, K, view(ImΣ, :, :, iT))
+            mul!(ReΣ, KK, view(ImΣ, :, :, iT))
             view(Σ_new, :, :, iT) .= complex.(ReΣ, view(ImΣ, :, :, iT))
         end
         # 5. Average over degenerate multiplets, on the host.

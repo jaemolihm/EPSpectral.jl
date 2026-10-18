@@ -84,19 +84,19 @@ function linear_interpolation_table(ωs, xs)
 end
 
 """
-    apply_interpolation_table!(Y, Σ, j, t) -> Y
+    apply_interpolation_table!(Y, ys, j, t) -> Y
 
-Apply the table `(j, t)` of [`linear_interpolation_table`](@ref) to the columns of `Σ`:
-`Y[r, i] = (1 - t[r]) Σ[j[r], i] + t[r] Σ[j[r] + 1, i]`. A gather broadcast over backend arrays, so
-it runs on the host and on the device and is deterministic.
+Apply the table `(j, t)` of [`linear_interpolation_table`](@ref) to the columns of `ys`:
+`Y[r, i] = (1 - t[r]) ys[j[r], i] + t[r] ys[j[r] + 1, i]`. A gather broadcast over backend arrays,
+so it runs on the host and on the device and is deterministic.
 """
-function apply_interpolation_table!(Y, Σ, j, t)
-    lerp(Σ, jr, tr, i) = (1 - tr) * Σ[jr, i] + tr * Σ[jr + 1, i]
-    Y .= lerp.(Ref(Σ), j, t, reshape(axes(Y, 2), 1, :))
+function apply_interpolation_table!(Y, ys, j, t)
+    lerp(ys, jr, tr, i) = (1 - tr) * ys[jr, i] + tr * ys[jr + 1, i]
+    Y .= lerp.(Ref(ys), j, t, reshape(axes(Y, 2), 1, :))
 end
 
 """
-    bucket_table(backend, ωs) -> (; jtab::Vector{Int32}, x0, inv_h)
+    cell_search_table(backend, ωs) -> (; jtab::Vector{Int32}, x0, inv_h)
 
 The O(1) cell search table for the sorted grid `ωs`, with `jtab` placed on `backend`. The axis is
 cut into buckets of width `h < minimum(diff(ωs))` from `x0 = ωs[1]`, `bucket(x) = unsafe_trunc(Int,
@@ -106,15 +106,15 @@ nodes in earlier buckets, all of which lie below `x` because `bucket` is monoton
 The table has `(ωs[end] - ωs[1]) / h + 1` entries, 4 B each, which grows as the inverse of the
 finest cell; more than `2^24` entries (64 MiB) throws an `ArgumentError`.
 """
-function bucket_table(backend, ωs)
+function cell_search_table(backend, ωs)
     FT = eltype(ωs)
     x0 = first(ωs)
     h_min = minimum(diff(ωs))
     inv_h = 1 / (FT(1 - 1e-6) * h_min)
     nbuckets = trunc(Int, min((last(ωs) - x0) * inv_h, 2^40)) + 1
     nbuckets <= 2^24 || throw(ArgumentError(
-        "bucket table of $nbuckets entries for a grid with minimum spacing $h_min over a range " *
-        "$(last(ωs) - x0); use a grid without a near-coincident pair of nodes"))
+        "cell search table of $nbuckets entries for a grid with minimum spacing $h_min over a " *
+        "range $(last(ωs) - x0); use a grid without a near-coincident pair of nodes"))
     buckets = [unsafe_trunc(Int, (x - x0) * inv_h) for x in ωs]
     allunique(buckets) || throw(ArgumentError("two grid nodes fall in one bucket"))
     jtab = Int32[searchsortedfirst(buckets, b) - 1 for b in 0:last(buckets)]
@@ -122,25 +122,25 @@ function bucket_table(backend, ωs)
 end
 
 """
-    _interp_linear_grid(Σin, col, x, ωs, ωs_buckets)
+    _interp_linear_grid(ys, col, x, ωs, ωs_cell_table)
 
-Linear interpolation of column `col` of `Σin` (sampled on the sorted grid `ωs`, `size(Σin, 1) ==
+Linear interpolation of column `col` of `ys` (sampled on the sorted grid `ωs`, `size(ys, 1) ==
 length(ωs)`) at `x`, held flat outside the grid: `Gridded(Linear())` with `Flat()` extrapolation
-in Interpolations.jl. The cell is found from `ωs_buckets = bucket_table(backend, ωs)` (on the same
-backend as `ωs`): one table read and one comparison. Takes isbits values and arrays, neither
-allocates nor throws, so it can be called from a device broadcast.
+in Interpolations.jl. The cell is found from `ωs_cell_table = cell_search_table(backend, ωs)`
+(on the same backend as `ωs`): one table read and one comparison. Takes isbits values and arrays,
+neither allocates nor throws, so it can be called from a device broadcast.
 """
-@inline function _interp_linear_grid(Σin, col, x, ωs, ωs_buckets)
-    (; jtab, x0, inv_h) = ωs_buckets
+@inline function _interp_linear_grid(ys, col, x, ωs, ωs_cell_table)
+    (; jtab, x0, inv_h) = ωs_cell_table
     n = length(ωs)
-    !(x > (@inbounds ωs[1])) && return @inbounds Σin[1, col]   # also a NaN x
-    x >= (@inbounds ωs[n]) && return @inbounds Σin[n, col]
+    !(x > (@inbounds ωs[1])) && return @inbounds ys[1, col]   # also a NaN x
+    x >= (@inbounds ωs[n]) && return @inbounds ys[n, col]
     # ωs[1] < x < ωs[n], so the bucket is in 0:bucket(ωs[n]) and j + 1 <= n.
     j = Int(@inbounds jtab[unsafe_trunc(Int, (x - x0) * inv_h) + 1])
     j += @inbounds ωs[j + 1] <= x
     @inbounds begin
         t = (x - ωs[j]) / (ωs[j + 1] - ωs[j])
-        (1 - t) * Σin[j, col] + t * Σin[j + 1, col]
+        (1 - t) * ys[j, col] + t * ys[j + 1, col]
     end
 end
 
