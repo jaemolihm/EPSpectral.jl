@@ -72,7 +72,7 @@ function holstein_1d_loop_setup(; nk, t, ω0, g2, ωs, μ_start)
        W = 1.0, nstates_base = 0.0, multiplets = Vector{Int}[], ωs = collect(ωs),
        ωs_cell_table = EPSpectral.cell_search_table(EP.CPUBackend(), ωs), ωs_spectral,
        ωs_spectral_dev = collect(ωs_spectral),
-       ωs_spectral_trapezoid_weights = EPSpectral.trapezoid_weights(ωs_spectral),
+       ωs_spectral_weights = EPSpectral.trapezoid_weights(ωs_spectral),
        j_spectral, t_spectral, KK = EPSpectral.kramers_kronig_matrix(ωs), μ_start)
 end
 

@@ -153,7 +153,7 @@ function _setup_ladder(setup, scgd0, symmetry; backend)
     (; setup..., inner_states_by_star, inner_star_ptr, R = to_device(backend, R),
        klo = to_device(backend, klo), wlo = to_device(backend, wlo), whi = to_device(backend, whi), nshift,
        dω_unit = FT(dω_unit),
-       ωs_trapezoid_weights = to_device(backend, trapezoid_weights(ωs)),
+       ωs_weights = to_device(backend, trapezoid_weights(ωs)),
        v = to_device(backend, reduce(hcat, el_i.vs)))
 end
 
@@ -302,7 +302,7 @@ end
 # `niter[Ω, T]`, `history[Ω, T]` and the vertex `J` (`nothing` unless `store_vertex`).
 function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_vertex, backend,
         gpu_tile, ω_acoustic, verbosity)
-    (; ωs, ε_i, w_i, ωs_trapezoid_weights, v) = ladder
+    (; ωs, ε_i, w_i, ωs_weights, v) = ladder
     FT = eltype(ladder.g2)
     nω, ni, nT = size(Σ)
     nΩ = length(Ωs)
@@ -333,8 +333,7 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
             shifted_Σ!(Σd_p, Σ_T, Array(ωs) .+ Ω / 2)
             contour_greens!(Gm, Gp, ε_i, Σd_m, Σd_p, ωs, Ω, μ[iT], T)
             attach_greens_to_bare_vertex!(J0, Gm, v, Gp)
-            σ_bubble[:, :, iΩ, iT] =
-                conductivity_from_vertex(J0, v, w_i, ωs_trapezoid_weights, Ω, T)
+            σ_bubble[:, :, iΩ, iT] = conductivity_from_vertex(J0, v, w_i, ωs_weights, Ω, T)
             ladder_kernel_TΩ!(LJ_, J_) =
                 apply_ladder_kernel!(LJ_, J_, ladder, workspace, Gm, Gp, T; ω_acoustic)
 
@@ -359,7 +358,7 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
                 for iter in 1:maxiter
                     ladder_kernel_TΩ!(LJ, J)
                     J .= J0 .+ LJ
-                    push!(σ_iter, conductivity_from_vertex(J, v, w_i, ωs_trapezoid_weights, Ω, T))
+                    push!(σ_iter, conductivity_from_vertex(J, v, w_i, ωs_weights, Ω, T))
                     niter[iΩ, iT] = iter
                     if iter > 1 && norm(σ_iter[end] - σ_iter[end-1]) < rtol * norm(σ_iter[end])
                         converged[iΩ, iT] = true
@@ -368,8 +367,7 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
                 end
                 history[iΩ, iT] = (; norms = FT[], σ_iter)
             end
-            σ_ladder[:, :, iΩ, iT] =
-                conductivity_from_vertex(J, v, w_i, ωs_trapezoid_weights, Ω, T)
+            σ_ladder[:, :, iΩ, iT] = conductivity_from_vertex(J, v, w_i, ωs_weights, Ω, T)
             store_vertex && (J_all[:, :, :, :, :, iΩ, iT] = Array(J))
             verbosity > 0 && @info "ladder T = $T, Ω = $Ω" solver niter = niter[iΩ, iT] converged = (
                 converged[iΩ, iT]) wall = time() - t0

@@ -37,9 +37,8 @@ function contour_bubble(res, iT, Ω)
     v = reduce(hcat, el_i.vs)
     J0 = zeros(ComplexF64, length(ωs), 4, 3, 2, ni)
     EPSpectral.attach_greens_to_bare_vertex!(J0, Gm, v, Gp)
-    ωs_trapezoid_weights = EPSpectral.trapezoid_weights(ωs)
-    EPSpectral.conductivity_from_vertex(J0, v, state_weights(el_i), ωs_trapezoid_weights, Ω,
-        res.Tlist[iT])
+    ωs_weights = EPSpectral.trapezoid_weights(ωs)
+    EPSpectral.conductivity_from_vertex(J0, v, state_weights(el_i), ωs_weights, Ω, res.Tlist[iT])
 end
 
 @testset "ladder bubble from the contour" begin

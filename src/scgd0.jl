@@ -178,7 +178,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs::FrequencyGrid,
        nstates_base = el_i.nstates_base, multiplets,
        ωs = to_device(backend, collect(FT, ωs)), ωs_cell_table,
        ωs_spectral, ωs_spectral_dev = to_device(backend, collect(FT, ωs_spectral)),
-       ωs_spectral_trapezoid_weights = to_device(backend, trapezoid_weights(ωs_spectral)),
+       ωs_spectral_weights = to_device(backend, trapezoid_weights(ωs_spectral)),
        j_spectral = to_device(backend, j_spectral), t_spectral = to_device(backend, t_spectral),
        KK = to_device(backend, kramers_kronig_matrix(ωs)), μ_start)
 end
@@ -189,7 +189,7 @@ end
 function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, Σ_init, fix_μ,
         ω_acoustic, verbosity)
     (; g2, ωph, iq_kk, iks_i, iks_f, ε_i, w_i, ε_f, w_f, f_to_i, W, nstates_base, multiplets, ωs,
-       ωs_cell_table, ωs_spectral, ωs_spectral_dev, ωs_spectral_trapezoid_weights, j_spectral,
+       ωs_cell_table, ωs_spectral, ωs_spectral_dev, ωs_spectral_weights, j_spectral,
        t_spectral, KK) = setup
     FT = eltype(g2)
     nm, ni, nf = size(g2)
@@ -304,8 +304,8 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
             apply_interpolation_table!(Σ_spectral, Σ_new_T, j_spectral, t_spectral)
             A .= .-imag.(inv.(ωs_spectral_dev .- transpose(ε_i) .- Σ_spectral)) ./ π
             mul!(D, A, w_i)
-            D .*= ωs_spectral_trapezoid_weights
-            hist_minA[iT, iter] = minimum(transpose(A) * ωs_spectral_trapezoid_weights)
+            D .*= ωs_spectral_weights
+            hist_minA[iT, iter] = minimum(transpose(A) * ωs_spectral_weights)
             # 7. Chemical potential, on the host.
             if !fix_μ
                 D_host = Array(D)

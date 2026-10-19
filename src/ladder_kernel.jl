@@ -99,7 +99,7 @@ function attach_greens_to_bare_vertex!(J0, Gm, v, Gp)
 end
 
 """
-    conductivity_from_vertex(J, v, w_i, ωs_trapezoid_weights, Ω, T) -> σ::Matrix
+    conductivity_from_vertex(J, v, w_i, ωs_weights, Ω, T) -> σ::Matrix
 
 The 3x3 conductivity (without the factor `spin_degeneracy / volume`, and not symmetrized) of the
 vertex `J[ω, c12, cart, c0, i]` at probe frequency `Ω >= 0` and temperature `T`:
@@ -107,17 +107,16 @@ vertex `J[ω, c12, cart, c0, i]` at probe frequency `Ω >= 0` and temperature `T
     σ_ab = Re[ F(Ω)/(2πi) Σ_i w_i Σ_ω Wω[ω] conj(v_ia) (J_ib^{22,c0=1} + J_ib^{11,c0=2})(ω) ],
     F(0) = i/(4T),    F(Ω) = -1/(2iΩ (1 + 2 n_B(Ω, T))),
 
-with the state weights `w_i`, the quadrature weights `Wω = ωs_trapezoid_weights` of the grid
+with the state weights `w_i`, the quadrature weights `Wω = ωs_weights` of the grid
 ([`trapezoid_weights`](@ref)) and the velocities `v[cart, i]`. For `J` the bare vertex of
 [`attach_greens_to_bare_vertex!`](@ref) this is the bubble
 `π Σ_i w_i v_a v_b Σ_ω Wω[ω] A_i(ω - Ω/2) A_i(ω + Ω/2) (f(ω - Ω/2 - μ) - f(ω + Ω/2 - μ))/Ω`,
 with `-∂f/∂ω` in place of the last factor at `Ω = 0`.
 """
-function conductivity_from_vertex(J, v, w_i, ωs_trapezoid_weights, Ω, T)
+function conductivity_from_vertex(J, v, w_i, ωs_weights, Ω, T)
     F = iszero(Ω) ? im / (4T) : -1 / (2im * Ω * (1 + 2 * occ_boson(Ω, T)))
     # Y[b, i] = Σ_ω Wω[ω] (J_ib^{22,c0=1} + J_ib^{11,c0=2})(ω)
-    Y = @views sum(reshape(ωs_trapezoid_weights, :, 1, 1) .* (J[:, 4, :, 1, :] .+ J[:, 1, :, 2, :]);
-        dims = 1)
+    Y = @views sum(reshape(ωs_weights, :, 1, 1) .* (J[:, 4, :, 1, :] .+ J[:, 1, :, 2, :]); dims = 1)
     S = (conj.(v) .* reshape(w_i, 1, :)) * transpose(reshape(Y, size(Y, 2), size(Y, 3)))
     real.(F / (2π * im) .* Array(S))
 end
