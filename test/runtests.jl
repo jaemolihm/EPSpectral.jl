@@ -24,22 +24,25 @@ include("holstein_1d_reference.jl")
 include("pb_fixture.jl")
 include("ladder_fixtures.jl")
 
+# `Pkg.test(; test_args = ["test_frequency_grids.jl", ...])` runs only the named files.
+const CPU_TEST_FILES = ["test_kramers_kronig.jl", "test_frequency_grids.jl", "test_scgd0_kernel.jl",
+    "test_scgd0_mu.jl", "test_scgd0_loop.jl", "test_scgd0_holstein.jl",
+    "test_scgd0_spectral_grid.jl", "test_scgd0_pb.jl", "test_ladder_bubble.jl",
+    "test_ladder_kernel.jl", "test_ladder_holstein.jl", "test_ladder_pb.jl"]
+const GPU_TEST_FILES = ["test_scgd0_gpu.jl", "test_ladder_gpu.jl"]
+for file in ARGS
+    file in CPU_TEST_FILES || file in GPU_TEST_FILES || error("unknown test file $file")
+end
+selected(file) = isempty(ARGS) || file in ARGS
+
 @testset "EPSpectral.jl" begin
-    include("test_kramers_kronig.jl")
-    include("test_frequency_grids.jl")
-    include("test_scgd0_kernel.jl")
-    include("test_scgd0_mu.jl")
-    include("test_scgd0_loop.jl")
-    include("test_scgd0_holstein.jl")
-    include("test_scgd0_spectral_grid.jl")
-    include("test_scgd0_pb.jl")
-    include("test_ladder_bubble.jl")
-    include("test_ladder_kernel.jl")
-    include("test_ladder_holstein.jl")
-    include("test_ladder_pb.jl")
+    for file in filter(selected, CPU_TEST_FILES)
+        include(file)
+    end
     if HAVE_CUDA
-        include("test_scgd0_gpu.jl")
-        include("test_ladder_gpu.jl")
+        for file in filter(selected, GPU_TEST_FILES)
+            include(file)
+        end
     else
         @info "CUDA not functional: skipping the CPU-vs-GPU testsets"
     end
