@@ -16,7 +16,7 @@ and the chemical potential μ, as an `SCGD0Result`:
    function, Re Σ by Kramers-Kronig, averages Σ over degenerate multiplets, and re-solves μ for the
    carrier density from the spectral functions, integrated by the trapezoid rule on the
    `FrequencyGrid` `ωs_spectral` (keyword; default the uniform grid on the span of `ωs` with step
-   `ωs.dω_min`; any grid covering `ωs`, graded too, with Σ held flat outside `ωs`). Σ starts from
+   `ωs.dω_min`; any grid covering `ωs`, graded too, with Σ held flat outside `ωs`, with a warning if it reaches past `ωs`). Σ starts from
    `-iη_init`, so `maxiter = 1` is the one-shot G0D0.
 3. A temperature stops iterating once `max |ΔΣ| < tol`.
 

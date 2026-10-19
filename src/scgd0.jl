@@ -56,7 +56,8 @@ Keywords:
   `FrequencyGrid(ωs::AbstractVector)` converts a vector of nodes).
 - `ωs_spectral = nothing`: the [`FrequencyGrid`](@ref) on which the spectral functions A_i(ω) that
   give μ and `min_i ∫A_i` are integrated, with Σ linearly interpolated onto it and held flat
-  outside `ωs`. Any grid, graded too, that covers the span of `ωs` to within `ωs.dω_min`.
+  outside `ωs`. Any grid, graded too, that covers the span of `ωs` to within `ωs.dω_min`; a grid
+  reaching past `ωs` is accepted with a warning.
   `nothing` takes the uniform grid on the span of `ωs` with step `ωs.dω_min`.
 - `η_min = 0` (scalar or per temperature), `η_init = 5 meV`: Σ starts from `-im * η_init`, so
   `maxiter = 1` is the one-shot G0D0.
@@ -97,6 +98,10 @@ function run_scgd0(model::Model{FT}, nk, window; occ::ElectronOccupationParams, 
             last(ωs_spectral) >= last(ωs) - ωs.dω_min) || throw(ArgumentError(
             "ωs_spectral spans [$(first(ωs_spectral)), $(last(ωs_spectral))], which does not " *
             "cover ωs = [$(first(ωs)), $(last(ωs))] to within ωs.dω_min"))
+        # Allowed past the ends of ωs, where Σ is held at its end value.
+        (first(ωs_spectral) < first(ωs) - ωs.dω_min || last(ωs_spectral) > last(ωs) + ωs.dω_min) &&
+            @warn "ωs_spectral spans [$(first(ωs_spectral)), $(last(ωs_spectral))], past ωs = " *
+                "[$(first(ωs)), $(last(ωs))]; Σ is held at its end values outside ωs"
     end
     fix_μ && !chemical_potential_is_computed(occ) && throw(ArgumentError(
         "fix_μ = true keeps μ at occ.μlist, which is not given"))

@@ -26,8 +26,9 @@
         @test_throws ArgumentError run(ωs_spectral = collect(-4.0:0.1:4.0))
         # A grid cutting off part of ωs would drop spectral weight from the μ solve.
         @test_throws ArgumentError run(ωs_spectral = FrequencyGrid(-1.0:0.01:6.0))
-        # A grid covering ωs, extending past it, is accepted.
-        @test run(ωs_spectral = FrequencyGrid(-5.0:0.01:5.0)) isa SCGD0Result
+        # A grid covering ωs, extending past it, is accepted with a warning.
+        @test (@test_logs (:warn, r"Σ is held at its end values") match_mode = :any run(
+            ωs_spectral = FrequencyGrid(-5.0:0.01:5.0))) isa SCGD0Result
     end
 
     @testset "graded grid against a fine uniform grid" begin
