@@ -2,6 +2,7 @@ using Test
 using EPSpectral
 using ElectronPhonon
 using LinearAlgebra: norm
+using JLD2: jldopen
 using Interpolations: interpolate, extrapolate, Gridded, Linear, Flat
 const EP = ElectronPhonon
 
@@ -30,6 +31,7 @@ include("ladder_fixtures.jl")
     include("test_scgd0_mu.jl")
     include("test_scgd0_loop.jl")
     include("test_scgd0_holstein.jl")
+    include("test_scgd0_spectral_grid.jl")
     include("test_scgd0_pb.jl")
     include("test_ladder_bubble.jl")
     include("test_ladder_kernel.jl")

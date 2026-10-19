@@ -1,12 +1,12 @@
 # The scGD0 iteration on the GPU against the host, on the pb window of `pb_fixture.jl`: first on
 # one shared setup, then end to end.
 @testset "scGD0 CPU vs GPU" begin
-    (; model, nk, window, ωs, ωs_dense, occ, η_init, η_min) = pb_scgd0_fixture()
+    (; model, nk, window, ωs, ωs_spectral, occ, η_init, η_min) = pb_scgd0_fixture()
     gpu = EP.gpu_backend()
     # Three iterations with the μ update, never converged (tol = 0). `run_scgd0` passes the same.
     loop_kwargs = (; η_min, η_init, maxiter = 3, tol = 0.0, Σ_init = nothing, fix_μ = false,
         ω_acoustic = EP.omega_acoustic, verbosity = 0)
-    setup_host = EPSpectral._setup_scgd0(model, nk, window, occ; ωs, dω_dense = step(ωs_dense),
+    setup_host = EPSpectral._setup_scgd0(model, nk, window, occ; ωs, ωs_spectral,
         backend = EP.CPUBackend(), symmetry = model.symmetry, verbosity = 0,
         electron_degen_cutoff = EP.electron_degen_cutoff)
     function run_loop(setup, backend; gpu_tile = nothing)
@@ -22,7 +22,7 @@
         # reproducibility of each. The setup's arrays go to the device; g2 stays on the host,
         # where the loop expects it.
         on_device(name, value) = name == :ωs_cell_table ?
-            EPSpectral.cell_search_table(gpu, setup_host.ωs) :
+            EPSpectral.cell_search_table(gpu, ωs) :
             name in (:g2, :el_i, :multiplets) || !(value isa Array) ?
             value : EP.to_device(gpu, value)
         names = keys(setup_host)
@@ -54,13 +54,14 @@
         # the split (measured 2.0e-7).
         @test norm(res_gpu.Σ - res_cpu.Σ) <= 1e-6 * norm(res_cpu.Σ)
         @test res_gpu.μ ≈ res_cpu.μ rtol = 1e-8
-        # Spectral DOS D_T(ωd) = Σ_i w_i A_i(ωd) dω from each run's Σ; it carries the same
+        # Spectral DOS D_T(ωa) = Σ_i w_i A_i(ωa) Wω(ωa) from each run's Σ; it carries the same
         # split-sized residual (measured 9.3e-8).
+        Wω = EPSpectral.trapezoid_weights(ωs_spectral)
         function spectral_dos(Σ, iT)
             Σd = stack(extrapolate(interpolate((ωs,), Σ[:, i, iT], Gridded(Linear())), Flat()
-                ).(ωs_dense) for i in axes(Σ, 2))
-            A = .-imag.(inv.(ωs_dense .- transpose(el.es) .- Σd)) ./ π
-            A * state_weights(el) .* step(ωs_dense)
+                ).(ωs_spectral) for i in axes(Σ, 2))
+            A = .-imag.(inv.(ωs_spectral .- transpose(el.es) .- Σd)) ./ π
+            A * state_weights(el) .* Wω
         end
         for iT in eachindex(occ.Tlist)
             D_cpu, D_gpu = spectral_dos(res_cpu.Σ, iT), spectral_dos(res_gpu.Σ, iT)

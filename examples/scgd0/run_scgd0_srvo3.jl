@@ -19,7 +19,8 @@ begin
     use_gpu = true
     nk = 80
     window = (eF - 0.15eV, eF + 0.15eV)
-    ωs = eF .+ vcat(-0.35:0.02:-0.11, -0.099:0.001:0.100, 0.12:0.02:0.34) .* eV
+    ωs = graded_frequency_grid([(eF - 0.1eV, eF + 0.1eV, 0.001eV),
+        (eF - 0.35eV, eF + 0.35eV, 0.02eV)])
     occ = ElectronOccupationParams(; Tlist = [100.0, 150, 200, 250, 300] .* K, nlist = 1.0,
         nelec = 0, volume = model.volume, spin_degeneracy = 2, type = :Metal)
     cfg = (; backend = ElectronPhonon.backend_from(use_gpu))

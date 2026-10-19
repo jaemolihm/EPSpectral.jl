@@ -5,7 +5,7 @@
         # infinite g2 (skipped, so no NaN), a random f -> i map and a complex Σin.
         nm, ni, nf = 3, 13, 17
         # A graded ωs: 0.1-wide cells in the middle, 0.02-wide on the outside.
-        ωs = vcat(-1.0:0.02:-0.6, -0.5:0.1:0.5, 0.6:0.02:1.0)
+        ωs = FrequencyGrid(vcat(-1.0:0.02:-0.6, -0.5:0.1:0.5, 0.6:0.02:1.0))
         nω = length(ωs)
         Σin = complex.(0.1 .* pseudorandom(nω, ni; seed = 7),
                        -0.05 .- 0.05 .* abs.(pseudorandom(nω, ni; seed = 8)))
