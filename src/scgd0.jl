@@ -178,7 +178,7 @@ function _setup_scgd0(model::Model{FT}, nk, window, occ; ωs::FrequencyGrid,
        nstates_base = el_i.nstates_base, multiplets,
        ωs = to_device(backend, collect(FT, ωs)), ωs_cell_table,
        ωs_spectral, ωs_spectral_dev = to_device(backend, collect(FT, ωs_spectral)),
-       Wω_spectral = to_device(backend, trapezoid_weights(ωs_spectral)),
+       ωs_spectral_trapezoid_weights = to_device(backend, trapezoid_weights(ωs_spectral)),
        j_spectral = to_device(backend, j_spectral), t_spectral = to_device(backend, t_spectral),
        KK = to_device(backend, kramers_kronig_matrix(ωs)), μ_start)
 end
@@ -189,7 +189,8 @@ end
 function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_tile, Σ_init, fix_μ,
         ω_acoustic, verbosity)
     (; g2, ωph, iq_kk, iks_i, iks_f, ε_i, w_i, ε_f, w_f, f_to_i, W, nstates_base, multiplets, ωs,
-       ωs_cell_table, ωs_spectral, ωs_spectral_dev, Wω_spectral, j_spectral, t_spectral, KK) = setup
+       ωs_cell_table, ωs_spectral, ωs_spectral_dev, ωs_spectral_trapezoid_weights, j_spectral,
+       t_spectral, KK) = setup
     FT = eltype(g2)
     nm, ni, nf = size(g2)
     nω, nωa, nT = length(ωs), length(ωs_spectral), length(occ)
@@ -215,7 +216,7 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
     ImΣ = alloc(backend, FT, nω, ni, nT)
     ReΣ = alloc(backend, FT, nω, ni)
     A = alloc(backend, FT, nωa, ni)                    # spectral functions A_i(ωa)
-    D = alloc(backend, FT, nωa)                        # D_T(ωa) = Σ_i w_i A_i(ωa) Wω_spectral(ωa)
+    D = alloc(backend, FT, nωa)                        # D_T(ωa) = Σ_i w_i A_i(ωa) × trapezoid weight of ωa
     # One chunk of ωq and of g2 in the (ν f, i) layout of `add_fan_migdal_imsigma!`, flat so that a
     # shorter last chunk is a contiguous prefix.
     ωq_buf = alloc(backend, FT, nm * nf_chunk * ni)
@@ -303,8 +304,8 @@ function _loop_scgd0(setup, occ; η_min, η_init, maxiter, tol, backend, gpu_til
             apply_interpolation_table!(Σ_spectral, Σ_new_T, j_spectral, t_spectral)
             A .= .-imag.(inv.(ωs_spectral_dev .- transpose(ε_i) .- Σ_spectral)) ./ π
             mul!(D, A, w_i)
-            D .*= Wω_spectral
-            hist_minA[iT, iter] = minimum(transpose(A) * Wω_spectral)
+            D .*= ωs_spectral_trapezoid_weights
+            hist_minA[iT, iter] = minimum(transpose(A) * ωs_spectral_trapezoid_weights)
             # 7. Chemical potential, on the host.
             if !fix_μ
                 D_host = Array(D)
