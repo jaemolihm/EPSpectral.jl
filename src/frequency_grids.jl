@@ -95,6 +95,19 @@ function apply_interpolation_table!(Y, ys, j, t)
     Y .= lerp.(Ref(ys), j, t, reshape(axes(Y, 2), 1, :))
 end
 
+# Throw an `ArgumentError` unless `ωs` has at least two nodes and its consecutive spacings all exceed
+# `1e-8 (ωs[end] - ωs[1])`; a smaller spacing is a duplicated node or a few-ulp pair, and the step
+# the ladder derives from it would size an enormous shift table.
+function _check_frequency_grid(ωs)
+    length(ωs) >= 2 || throw(ArgumentError("ωs must have at least two points"))
+    gaps = diff(ωs)
+    h, j = findmin(gaps)
+    h > 1e-8 * (last(ωs) - first(ωs)) || throw(ArgumentError("ωs must be strictly increasing " *
+        "with spacings above 1e-8 of its span; ωs[$j] = $(ωs[j]) and ωs[$(j + 1)] = $(ωs[j + 1]) " *
+        "are $h apart"))
+    nothing
+end
+
 """
     cell_search_table(backend, ωs) -> (; jtab::Vector{Int32}, x0, inv_h)
 
@@ -151,3 +164,69 @@ Real part `ys = kramers_kronig_matrix(ωs) * zs` of the retarded function whose 
 grid `ωs`; see [`kramers_kronig_matrix`](@ref) for the interpolation and end conventions.
 """
 kramers_kronig(ωs, zs) = kramers_kronig_matrix(ωs) * zs
+
+"""
+    graded_frequency_grid(windows) -> Vector
+
+A grid whose step grows outward, from `windows = [(wmin, wmax, dw), ...]`: window `l` covers
+`[wmin, wmax]` with step `dw`. The windows are nested from the smallest to the largest, `wmin`
+non-increasing and `wmax` non-decreasing along the list, so the first window has the finest step.
+No symmetry about any point is imposed.
+
+Window 1 contributes its points in `[wmin_1, wmax_1]`, at least two. Window `l > 1` continues outward
+from the outermost node so far on each side in steps of `dw_l`, as long as the node stays within
+`[wmin_l, wmax_l]`; every cell is therefore at most `dw_l` wide, and the outer ends need not land on
+`wmin_l` or `wmax_l`. All nodes lie on `origin + dw_1 ℤ` with `origin = (wmin_1 + wmax_1) / 2`, the
+centre of the finest window, as the ladder ([`run_scgd0_ladder`](@ref)) requires of a grid. Every ratio
+`dw_l / dw_1` must therefore be an integer (to `1e-8`). If the width of the finest window is an odd
+number of `dw_1`, it has no node at either end: `graded_frequency_grid([(0.0, 1.0, 0.2)])` is
+`0.1:0.2:0.9`. Throws an `ArgumentError` for an empty list, a non-positive step, a window with
+`wmin >= wmax`, windows that are not nested, a non-integer ratio, or a finest window holding fewer than
+two nodes.
+
+```julia
+julia> print(graded_frequency_grid([(-2.0, 2.0, 1.0), (-5.0, 5.0, 2.0), (-15.0, 15.0, 5.0)]))
+[-14.0, -9.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 9.0, 14.0]
+
+julia> print(graded_frequency_grid([(-1.0, 3.0, 1.0), (-5.0, 9.0, 2.0), (-9.0, 16.0, 5.0)]))
+[-5.0, -3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 14.0]
+
+julia> meV = unit_to_aru(:meV); μ = 0.5;   # illustrative: 1 meV within 0.1 eV of μ, 5 meV to 0.3 eV, 20 meV to 1 eV
+
+julia> ωs = graded_frequency_grid([(μ - w * meV, μ + w * meV, dw * meV) for (w, dw) in ((100, 1), (300, 5), (1000, 20))]);
+```
+"""
+function graded_frequency_grid(windows)
+    isempty(windows) && throw(ArgumentError("windows must not be empty"))
+    wmins, wmaxs, dws = (float.([w[k] for w in windows]) for k in 1:3)
+    all(>(0), dws) && all(wmins .< wmaxs) || throw(ArgumentError(
+        "every window needs dw > 0 and wmin < wmax, got $windows"))
+    (issorted(wmins; rev = true) && issorted(wmaxs)) || throw(ArgumentError(
+        "windows must be nested from the smallest to the largest (wmin non-increasing, wmax " *
+        "non-decreasing), got $windows"))
+    origin, dw1 = (wmins[1] + wmaxs[1]) / 2, dws[1]
+    tol = 1e-8
+    # Node p sits at origin + dw1 * p; window l steps by r_l = dw_l / dw_1.
+    # u, v are the window ends in units of dw1 about the origin.
+    u = (wmins .- origin) ./ dw1
+    v = (wmaxs .- origin) ./ dw1
+    ps = Int[]
+    for l in eachindex(windows)
+        ratio = dws[l] / dw1
+        abs(ratio - round(ratio)) <= tol || throw(ArgumentError(
+            "dw[$l] = $(dws[l]) is not an integer multiple of dw[1] = $dw1 (ratio $ratio)"))
+        r = round(Int, ratio)
+        if l == 1
+            # Finest window: every point in [wmin, wmax].
+            append!(ps, ceil(Int, u[1] - tol):floor(Int, v[1] + tol))
+            length(ps) >= 2 || throw(ArgumentError(
+                "the finest window must hold at least two nodes, got $(length(ps)) for $(windows[1])"))
+        else
+            # Outer window: continue from the outermost node so far on each side, in its own steps.
+            p_lo, p_hi = minimum(ps), maximum(ps)
+            append!(ps, p_hi + r:r:floor(Int, v[l] + tol))
+            append!(ps, p_lo - r:-r:ceil(Int, u[l] - tol))
+        end
+    end
+    origin .+ dw1 .* sort!(ps)
+end

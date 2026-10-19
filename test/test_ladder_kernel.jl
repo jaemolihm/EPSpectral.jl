@@ -56,21 +56,62 @@ end
 @testset "ladder kernel" begin
     @testset "commensurability check" begin
         ωs = vcat(0.0:0.05:0.5, 0.52:0.02:0.8)
-        @test EPSpectral.check_frequency_grid_commensurate(ωs, 0.01) === nothing
-        @test EPSpectral.check_frequency_grid_commensurate(ωs, 0.005) === nothing
+        @test EPSpectral.ladder_shift_step(ωs, 0.01) == 0.01
+        @test EPSpectral.ladder_shift_step(ωs, 0.005) == 0.005
         # A step that does not divide the grid: the error names the compatible step.
-        err = try; EPSpectral.check_frequency_grid_commensurate(ωs, 0.03); catch e; e; end
+        err = try; EPSpectral.ladder_shift_step(ωs, 0.03); catch e; e; end
         @test err isa ArgumentError
         @test occursin("dω_shift = 0.01", err.msg) && occursin("factor 3", err.msg)
         # A grid with no compatible step.
-        err = try; EPSpectral.check_frequency_grid_commensurate([0.0, 1.0, 1.0 + sqrt(2) / 100], 1.0); catch e; e; end
+        ωs_none = [0.0, 1.0, 1.0 + sqrt(2) / 100]
+        err = try; EPSpectral.ladder_shift_step(ωs_none, 1.0); catch e; e; end
         @test err isa ArgumentError && occursin("No step", err.msg)
+        # The message names the node farthest off the lattice and the grid builder.
+        @test occursin("ωs[3] = $(ωs_none[3])", err.msg) && occursin("graded_frequency_grid", err.msg)
+    end
+
+    @testset "duplicated and few-ulp nodes" begin
+        # A duplicated node, a 1-ulp pair and a 1e-12 pair would give a zero or tiny derived step.
+        for ωs in ([0.0, 0.5, 0.5, 1.0], [0.0, 0.5, nextfloat(0.5), 1.0], [0.0, 1e-12, 0.5])
+            err = try; EPSpectral.ladder_shift_step(ωs, nothing); catch e; e; end
+            @test err isa ArgumentError && occursin("apart", err.msg)
+            @test_throws ArgumentError EPSpectral.ladder_shift_step(ωs, 0.5)
+            @test_throws ArgumentError EPSpectral._check_frequency_grid(ωs)
+        end
+        @test_throws ArgumentError EPSpectral._check_frequency_grid([0.0])
+    end
+
+    @testset "derived shift step" begin
+        # The lattice is the minimum step divided by k: k = 1 for a grid whose steps divide
+        # their minimum, k = 2 for 0.05 and 0.02 steps (lattice 0.01, minimum step 0.02).
+        ωs = vcat(0.0:0.05:0.5, 0.52:0.02:0.8)
+        @test EPSpectral.ladder_shift_step(ωs, nothing) ≈ 0.01
+        ωs_uniform = collect(0.0:0.02:1.0)
+        @test EPSpectral.ladder_shift_step(ωs_uniform, nothing) === minimum(diff(ωs_uniform))
+        ωs_pb = vcat(-0.5:0.05:-0.1, -0.09:0.01:0.09, 0.1:0.05:0.5)
+        @test EPSpectral.ladder_shift_step(ωs_pb, nothing) ≈ 0.01
+        # An explicit step is checked and returned as given.
+        @test EPSpectral.ladder_shift_step(ωs, 0.005) == 0.005
+        @test_throws ArgumentError EPSpectral.ladder_shift_step(ωs, 0.03)
+        @test_throws ArgumentError EPSpectral.ladder_shift_step([0.0, 1.0, 1.0 + sqrt(2) / 100], nothing)
+        # k > 1 is logged with its cost factor.
+        @test_logs (:info, r"factor 2") EPSpectral.ladder_shift_step(ωs, nothing; verbosity = 1)
+        @test_logs EPSpectral.ladder_shift_step(ωs_uniform, nothing; verbosity = 1)
+        # A fine step far from zero: the minimum spacing carries accumulated round-off, and the derived
+        # step is refined from the span (0.1 meV nodes around 11.83 eV in Ry, uniform and graded).
+        eV = 1 / 13.605693122994
+        center = 11.83 * eV
+        for grid in (collect(center .+ (-2eV:1e-4eV:2eV)),
+                graded_frequency_grid([(center - 0.1eV, center + 0.1eV, 1e-4eV), (center - 1eV, center + 1eV, 2e-3eV)]))
+            @test EPSpectral.ladder_shift_step(grid, nothing) ≈ 1e-4eV rtol = 1e-6
+            @test EPSpectral.ladder_shift_step(grid, 1e-4eV) == 1e-4eV
+        end
     end
 
     @testset "one regrouped shift against the direct interpolation" begin
         ωs = vcat(-1.0:0.1:-0.4, -0.35:0.05:0.35, 0.4:0.1:1.0)
-        h, M = 0.05, 12
-        (; klo, wlo, whi) = EPSpectral.vertex_shift_tables(ωs, h, M)
+        h, nshift = 0.05, 13
+        (; klo, wlo, whi) = EPSpectral.vertex_shift_tables(ωs, h, nshift)
         y0 = pseudorandom_complex(length(ωs); seed = 0.7)
         # y vanishes at the end nodes, where the regrouping is exact on the closed table values.
         y = copy(y0); y[1] = y[end] = 0
@@ -157,16 +198,37 @@ end
         (; model, nk, window, occ, res) = pb
         run(res; kwargs...) = run_scgd0_ladder(model, nk, window, res; occ, Ωs = [0.0],
             verbosity = 0, kwargs...)
-        # The coarse step 45 meV instead of 50 meV: ωs is not on a lattice of its minimum step.
-        ωs_bad = 11.83 * eV .+ vcat(-1.2:0.045:-0.25, -0.24:0.02:0.24, 0.25:0.045:1.2) .* eV
-        res_bad = EPSpectral.SCGD0Result(collect(ωs_bad),
-            fill(complex(0.0, -0.01), length(ωs_bad), res.el_i.n, length(res.Tlist)), res.μ,
+        with_ωs(ωs_new) = EPSpectral.SCGD0Result(collect(ωs_new),
+            fill(complex(0.0, -0.01), length(ωs_new), res.el_i.n, length(res.Tlist)), res.μ,
             res.el_i, res.Tlist, res.nlist, res.converged, res.history)
-        err = try; run(res_bad); catch e; e; end
-        @test err isa ArgumentError
-        @test occursin("not commensurate", err.msg) &&
-              (occursin("is compatible", err.msg) || occursin("No step", err.msg))
+        # The coarse step 45 meV with 20 meV cells and a 10 meV transition: the lattice is 5 meV, half
+        # the minimum step, which the derived default finds (twice the cost of the minimum step).
+        ωs_k2 = 11.83 * eV .+ vcat(-1.2:0.045:-0.25, -0.24:0.02:0.24, 0.25:0.045:1.2) .* eV
+        res_k2 = with_ωs(ωs_k2)
+        @test EPSpectral.ladder_shift_step(ωs_k2, nothing) ≈ 5e-3 * eV
+        out_k2 = run(res_k2)
+        @test out_k2.dω_shift ≈ 5e-3 * eV
+        # An explicit step (the internal check of `ladder_shift_step`) at the minimum step is not on
+        # the lattice: the error names the compatible step.
+        err = try; EPSpectral.ladder_shift_step(ωs_k2, 10e-3 * eV); catch e; e; end
+        @test err isa ArgumentError && occursin("is compatible", err.msg)
+        # A coarse step with no lattice at any k <= 64 is an error with or without an explicit step.
+        res_bad = with_ωs(11.83 * eV .+ vcat(-1.2:0.0452123:-0.25, -0.24:0.02:0.24, 0.25:0.0452123:1.2) .* eV)
+        for call in (() -> run(res_bad), () -> EPSpectral.ladder_shift_step(res_bad.ωs, 10e-3 * eV))
+            err = try; call(); catch e; e; end
+            @test err isa ArgumentError
+            @test occursin("not commensurate", err.msg) && occursin("No step", err.msg)
+        end
         @info "non-commensurate message" err.msg
+
+        # The derived step is the minimum step on a grid whose lattice it is, and the result reports it.
+        for case in (pb, holstein_ladder_case(; nk = 8))
+            derived = run_scgd0_ladder(case.model, case.nk, case.window, case.res; case.occ,
+                Ωs = [0.0], verbosity = 0, rtol = 1e-6)
+            @test derived.dω_shift == minimum(diff(case.ωs)) == case.dω_shift
+            # An explicit minimum step passes the check and is the derived one.
+            @test EPSpectral.ladder_shift_step(case.ωs, minimum(diff(case.ωs))) == derived.dω_shift
+        end
 
         # The same hat-basis shifts on a table twice as fine: one application on a vertex that
         # vanishes at the end nodes is unchanged. A nonzero end value is spread over one table
@@ -182,10 +244,14 @@ end
         LJ, LJ_half = (apply_ladder_case(case, J_ends, 1, 0.123 * eV) for case in (pb, pb_half))
         @info "end-value dependence of one application on the shift step" norm(LJ_half - LJ) / norm(LJ)
 
-        # The solve on the finer table is the same problem; σ differs by the end tails only.
-        a = run(res; rtol = 1e-10, maxiter = 60)
-        b = run(res; dω_shift = pb.dω_shift / 2, rtol = 1e-10, maxiter = 60)
-        @test a.dω_shift == pb.dω_shift && b.dω_shift == pb.dω_shift / 2
-        @info "σ_ladder on the step h and h/2" norm(b.σ_ladder - a.σ_ladder) / norm(a.σ_ladder)
+        # The solve on the finer table is the same problem; σ differs by the end tails only. The
+        # run derives the step, so the finer table is run through the loop on its own setup.
+        derived = run(res; rtol = 1e-10, maxiter = 60)
+        @test derived.dω_shift == pb.dω_shift && pb_half.dω_shift == pb.dω_shift / 2
+        run_loop(case) = EPSpectral._loop_ladder(case.ladder, res.Σ, res.μ, res.Tlist, [0.0];
+            solver = :gmres, rtol = 1e-10, maxiter = 60, store_vertex = false, backend = EP.CPUBackend(),
+            gpu_tile = nothing, ω_acoustic = EP.omega_acoustic, verbosity = 0)
+        σ, σ_half = (run_loop(case).σ_ladder for case in (pb, pb_half))
+        @info "σ_ladder on the step h and h/2" norm(σ_half - σ) / norm(σ)
     end
 end

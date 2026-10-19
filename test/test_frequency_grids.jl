@@ -92,4 +92,55 @@
             @test err <= 1e-13 * maximum(abs, Σin)
         end
     end
+
+    @testset "graded_frequency_grid" begin
+        # 1 meV cells within 0.1 eV and 20 meV cells to 0.34 eV (the SrVO3 grid), written as nested
+        # windows about 0.5; the origin is the centre of the first window.
+        grid = graded_frequency_grid([(0.4, 0.6, 0.001), (0.15, 0.85, 0.02)])
+        @test issorted(grid) && grid[1] ≈ 0.5 - 0.34 && grid[end] ≈ 0.5 + 0.34
+        @test count(x -> 0.4 <= x <= 0.6 + 1e-12, grid) == 201 && length(grid) == 201 + 24
+        @test minimum(diff(grid)) ≈ 0.001 && maximum(diff(grid)) ≈ 0.02
+        # The grid is commensurate with the finest step by construction, so the ladder derives it.
+        @test EPSpectral.ladder_shift_step(grid, nothing) ≈ 0.001
+        # Exact node lists: window l continues outward from the last node so far in its own steps.
+        @test graded_frequency_grid([(-2.0, 2.0, 1.0), (-5.0, 5.0, 2.0), (-15.0, 15.0, 5.0)]) ==
+            [-14.0, -9.0, -4.0, -2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 9.0, 14.0]
+        # Asymmetric windows about the origin 1, steps 1, 2, 5: nodes 1 + p with p in -2:2, then
+        # steps of 2 out to -6 and 8, then steps of 5: 13 on the right; -11 on the left would leave [-9, 16].
+        @test graded_frequency_grid([(-1.0, 3.0, 1.0), (-5.0, 9.0, 2.0), (-9.0, 16.0, 5.0)]) ==
+            [-5.0, -3.0, -1.0, 0.0, 1.0, 2.0, 3.0, 5.0, 7.0, 9.0, 14.0]
+        # Every cell is at most the step of the innermost window holding both of its ends, and all nodes
+        # lie inside the outermost window.
+        for windows_l in ([(-2.0, 2.0, 1.0), (-5.0, 5.0, 2.0), (-15.0, 15.0, 5.0)],
+                [(-1.0, 3.0, 1.0), (-5.0, 9.0, 2.0), (-9.0, 16.0, 5.0)],
+                [(0.4, 0.6, 0.001), (0.15, 0.85, 0.02)])
+            grid_l = graded_frequency_grid(windows_l)
+            @test windows_l[end][1] - 1e-12 <= grid_l[1] && grid_l[end] <= windows_l[end][2] + 1e-12
+            for (j, cell) in enumerate(diff(grid_l))
+                dw_inner = minimum(dw for (wmin, wmax, dw) in windows_l
+                                   if wmin - 1e-12 <= grid_l[j] && grid_l[j + 1] <= wmax + 1e-12)
+                @test cell <= dw_inner + 1e-12
+            end
+        end
+        windows = [(0.0, 0.1, 0.01), (-0.2, 1.0, 0.03)]
+        grid3 = graded_frequency_grid(windows)
+        @test all(p -> abs(p - round(p)) < 1e-8, (grid3 .- 0.05) ./ 0.01)
+        @test issorted(grid3) && allunique(round.(grid3; digits = 9))
+        @test grid3[1] >= -0.2 - 1e-12 && grid3[end] <= 1.0 + 1e-12 && 1.0 - grid3[end] < 0.03
+        @test EPSpectral.ladder_shift_step(grid3, nothing) ≈ 0.01
+        # A single window is the uniform grid.
+        @test graded_frequency_grid([(-1.0, 1.0, 0.25)]) ≈ -1.0:0.25:1.0
+        # A single window of odd width in steps has no node at its ends: the origin is its centre.
+        @test graded_frequency_grid([(0.0, 1.0, 0.2)]) ≈ 0.1:0.2:0.9
+        # A finest window with fewer than two nodes (here one: 0.1 / 0.2 holds only the origin).
+        @test_throws ArgumentError graded_frequency_grid([(0.0, 0.1, 0.2)])
+        @test_throws ArgumentError graded_frequency_grid([(0.0, 0.1, 0.2), (-1.0, 1.0, 0.4)])
+        # A non-integer ratio, windows that are not nested, a bad window, an empty list.
+        @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-3.0, 3.0, 0.025)])
+        @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-0.5, 3.0, 0.02)])
+        @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.01), (-3.0, 0.5, 0.02)])
+        @test_throws ArgumentError graded_frequency_grid([(1.0, -1.0, 0.01)])
+        @test_throws ArgumentError graded_frequency_grid([(-1.0, 1.0, 0.0)])
+        @test_throws ArgumentError graded_frequency_grid([])
+    end
 end

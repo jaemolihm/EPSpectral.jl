@@ -27,8 +27,9 @@ electron-only Kubo conductivity at every temperature and probe frequency `Ωs` (
 from the bare current vertex (`σ_bubble`) and from the vertex dressed by the ladder of the scGD0
 coupling on the 2x2 Keldysh contour (`σ_ladder`), as an `SCGD0LadderResult`. The ladder equation
 is solved by GMRES (default, `rtol = 1e-2`) or by a fixed-point iteration. The output grid `ωs` of the
-scGD0 run must be commensurate with the shift step `dω_shift` (default `minimum(diff(ωs))`); the cost
-grows as `1 / dω_shift`. With `backend = gpu_backend()` the ladder runs on the device by the same
+scGD0 run must be commensurate with the shift step `dω_shift`, derived as the largest step on which it
+is (`minimum(diff(ωs)) / k`) and reported in the result; the cost grows as `1 / dω_shift`. `graded_frequency_grid([(wmin, wmax, dw), ...])` builds graded
+grids from nested windows that are commensurate by construction. With `backend = gpu_backend()` the ladder runs on the device by the same
 code as on the host (g2 resident or streamed in chunks of `gpu_tile` inner states, as in scGD0).
 `save_scgd0_ladder` / `load_scgd0_ladder` write and read a result with JLD2.
 

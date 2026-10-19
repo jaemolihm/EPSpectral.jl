@@ -49,7 +49,8 @@ returned, unconverged ones flagged.
 Keywords:
 - `occ`: `ElectronOccupationParams` with `occ_type = :FermiDirac`. `occ.μlist`, if given, is the
   starting μ; otherwise μ starts from the bare window bands. `occ` is not modified.
-- `ωs`: output grid, strictly increasing. `dω_dense = minimum(diff(ωs))` is the step of
+- `ωs`: output grid, strictly increasing ([`graded_frequency_grid`](@ref) builds a graded one that
+  `run_scgd0_ladder` accepts). `dω_dense = minimum(diff(ωs))` is the step of
   `ωs_dense = range(extrema(ωs)...; step = dω_dense)`, the grid of the spectral functions A_i(ω)
   that give μ and `min_i ∫A_i`, with Σ linearly interpolated onto it.
 - `η_min = 0` (scalar or per temperature), `η_init = 5 meV`: Σ starts from `-im * η_init`, so
@@ -77,8 +78,7 @@ function run_scgd0(model::Model{FT}, nk, window; occ::ElectronOccupationParams, 
         "run_scgd0 uses the Fermi-Dirac occupation only, got occ.occ_type = $(occ.occ_type)"))
     occ.type ∈ (:Metal, :Semiconductor) || throw(ArgumentError(
         "occ.type must be :Metal or :Semiconductor, got $(occ.type)"))
-    (length(ωs) >= 2 && all(>(0), diff(ωs))) || throw(ArgumentError(
-        "ωs must be strictly increasing with at least two points"))
+    _check_frequency_grid(ωs)
     fix_μ && !chemical_potential_is_computed(occ) && throw(ArgumentError(
         "fix_μ = true keeps μ at occ.μlist, which is not given"))
     η_min = η_min isa Number ? fill(FT(η_min), length(occ)) : collect(FT, η_min)
