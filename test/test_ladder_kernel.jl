@@ -152,6 +152,39 @@ end
         end
     end
 
+    @testset "coupling on the shift grid against the sum over modes at every shift" begin
+        pb = pb_ladder_case()
+        # Holstein: one mode, many shifts; pb on a step h/4: several shifts, and an acoustic mode
+        # below ω_acoustic that is skipped.
+        for (name, case) in (("Holstein", holstein_ladder_case(; symmetry = nothing)),
+                             ("pb, step h/4", with_shift_step(pb, pb.dω_shift / 4)))
+            (; ladder, res) = case
+            chunk = first(EPSpectral._ladder_workspace(ladder, EP.CPUBackend(), 7, 0).chunks)
+            nm, ni, _ = size(ladder.g2)
+            ωq = Array{Float64}(undef, nm, chunk.nf, ni)
+            EP.gather_pair_table!(ωq, ladder.ωph, transpose(ladder.iq_kk), chunk.iks_f, ladder.iks_i)
+            nB = EPSpectral.occ_boson.(ωq, res.Tlist[1])
+            B = Array{Float64}(undef, ladder.nshift, chunk.nf, ni, 2)
+            EPSpectral.bin_coupling_on_shift_grid!(B, ladder.g2, chunk.fidx, ωq, nB, chunk.w_f,
+                ladder.dω_shift, EP.omega_acoustic)
+            B_ref = similar(B)
+            for m in axes(B, 1), f in axes(B, 2), i in axes(B, 3), type in 1:2
+                acc = 0.0
+                for ν in axes(ωq, 1)
+                    ωq[ν, f, i] < EP.omega_acoustic && continue
+                    tent = max(0.0, 1 - abs(ωq[ν, f, i] / ladder.dω_shift - (m - 1)))
+                    c = ladder.g2[ν, i, chunk.fidx[f]] * tent
+                    acc += type == 1 ? c : c * nB[ν, f, i]
+                end
+                B_ref[m, f, i, type] = chunk.w_f[f] * acc
+            end
+            @info "coupling on the shift grid" name nshift = ladder.nshift skipped = count(<(EP.omega_acoustic), ωq)
+            # The scatter adds the same nonzero terms in the same order, so the sums are bitwise equal.
+            @test isequal(B, B_ref)
+            @test norm(B) > 0 && all(iszero, B[end, :, :, :])
+        end
+    end
+
     @testset "apply_ladder_kernel! against the naive loop" begin
         eV = unit_to_aru(:eV)
         pb = pb_ladder_case()

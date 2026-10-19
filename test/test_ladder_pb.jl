@@ -67,6 +67,8 @@
             volume = model.volume, spin_degeneracy = 2, type = :Metal)
         @test_throws ArgumentError run_scgd0_ladder(model, nk, window, res; occ = occ_other,
             verbosity = 0)
+        # The shift-grid coupling build has no row for a negative phonon frequency.
+        @test_throws ArgumentError run(; ω_acoustic = -1.0)
         # A different window gives different states than scgd0.el_i.
         @test_throws ArgumentError run_scgd0_ladder(model, nk, (window[1], window[2] - 0.2 * eV),
             res; occ, verbosity = 0)
