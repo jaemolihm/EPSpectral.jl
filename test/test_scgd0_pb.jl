@@ -8,66 +8,65 @@
 # Its inputs (states, g2, ωq, nstates_base) come from its own `G2Calculator` run with
 # `symmetry = nothing`, the per-pair ωq read off that run's phonon table by a plain loop; nothing is
 # shared with the run under test.
-
-# The v2 scFM iteration (`run_scFM_v2` with wfpt = false), `niter` iterations from Σ = -iη_init.
-function scgd0_v2_reference(el, g2, ωq, ωs, ωs_spectral, occ, ηlist, η_init, niter, ω_acoustic)
-    nω, n, nT, nmodes = length(ωs), el.n, length(occ), size(g2, 1)
-    # Re Σ by the spline Kramers-Kronig map, as in the package.
-    K_re = EPSpectral.kramers_kronig_matrix(ωs)
-    occ_f(e, T) = 1 / (exp(e / T) + 1)
-    occ_b(e, T) = 1 / expm1(e / T)
-    on_spectral(Σs) = [extrapolate(interpolate((ωs,), Σs[:, i, iT], Gridded(Linear())), Flat())(ω)
-                    for ω in ωs_spectral, i in 1:n, iT in 1:nT]
-    Σs = fill(complex(0.0, -η_init), nω, n, nT)
-    μlist = copy(occ.μlist)
-    for _ in 1:niter
-        Σs_new = zeros(ComplexF64, nω, n, nT)
-        for iT in 1:nT, f in 1:n
-            T, μ = occ.Tlist[iT], μlist[iT]
-            Σ_f = Σs[:, f, iT]
-            Σ_clamped = @. complex(real(Σ_f), min(imag(Σ_f), -ηlist[iT]))
-            Σ_itp = extrapolate(interpolate((ωs,), Σ_clamped, Gridded(Linear())), Flat())
-            ekq, wkq = el.es[f], el.weights[f]
-            for i in 1:n, ν in 1:nmodes
-                ω_q = ωq[ν, i, f]
-                ω_q < ω_acoustic && continue
-                nq = occ_b(ω_q, T)
-                for (iω, ω) in enumerate(ωs)
-                    A1 = imag(1 / (ω + ω_q - ekq - Σ_itp(ω + ω_q))) * (nq + occ_f(ω + ω_q - μ, T))
-                    A2 = imag(1 / (ω - ω_q - ekq - Σ_itp(ω - ω_q))) *
-                         (nq + 1 - occ_f(ω - ω_q - μ, T))
-                    Σs_new[iω, i, iT] += (A1 + A2) * g2[ν, i, f] * wkq * im
+@testitem "scGD0 pb against the v2 reference" setup = [Common] begin
+    # The v2 scFM iteration (`run_scFM_v2` with wfpt = false), `niter` iterations from Σ = -iη_init.
+    function scgd0_v2_reference(el, g2, ωq, ωs, ωs_spectral, occ, ηlist, η_init, niter, ω_acoustic)
+        nω, n, nT, nmodes = length(ωs), el.n, length(occ), size(g2, 1)
+        # Re Σ by the spline Kramers-Kronig map, as in the package.
+        K_re = EPSpectral.kramers_kronig_matrix(ωs)
+        occ_f(e, T) = 1 / (exp(e / T) + 1)
+        occ_b(e, T) = 1 / expm1(e / T)
+        on_spectral(Σs) = [extrapolate(interpolate((ωs,), Σs[:, i, iT], Gridded(Linear())), Flat())(ω)
+                        for ω in ωs_spectral, i in 1:n, iT in 1:nT]
+        Σs = fill(complex(0.0, -η_init), nω, n, nT)
+        μlist = copy(occ.μlist)
+        for _ in 1:niter
+            Σs_new = zeros(ComplexF64, nω, n, nT)
+            for iT in 1:nT, f in 1:n
+                T, μ = occ.Tlist[iT], μlist[iT]
+                Σ_f = Σs[:, f, iT]
+                Σ_clamped = @. complex(real(Σ_f), min(imag(Σ_f), -ηlist[iT]))
+                Σ_itp = extrapolate(interpolate((ωs,), Σ_clamped, Gridded(Linear())), Flat())
+                ekq, wkq = el.es[f], el.weights[f]
+                for i in 1:n, ν in 1:nmodes
+                    ω_q = ωq[ν, i, f]
+                    ω_q < ω_acoustic && continue
+                    nq = occ_b(ω_q, T)
+                    for (iω, ω) in enumerate(ωs)
+                        A1 = imag(1 / (ω + ω_q - ekq - Σ_itp(ω + ω_q))) * (nq + occ_f(ω + ω_q - μ, T))
+                        A2 = imag(1 / (ω - ω_q - ekq - Σ_itp(ω - ω_q))) *
+                             (nq + 1 - occ_f(ω - ω_q - μ, T))
+                        Σs_new[iω, i, iT] += (A1 + A2) * g2[ν, i, f] * wkq * im
+                    end
                 end
             end
-        end
-        for iT in 1:nT, i in 1:n
-            Σs_new[:, i, iT] .+= K_re * imag.(Σs_new[:, i, iT])
-        end
-        Σs = Σs_new
-        # Metal branch of `compute_occupation!`.
-        Σs_spectral = on_spectral(Σs)
-        # Trapezoid weights: half the distance between the neighbouring nodes.
-        Wω = [(ωs_spectral[min(r + 1, end)] - ωs_spectral[max(r - 1, 1)]) / 2
-              for r in eachindex(ωs_spectral)]
-        for iT in 1:nT
-            T = occ.Tlist[iT]
-            function nocc(μ)
-                fermi = [occ_f(ω - μ, T) for ω in ωs_spectral]
-                s = 0.0
-                for i in 1:n
-                    As = @. -imag(1 / (ωs_spectral - el.es[i] - Σs_spectral[:, i, iT])) / π
-                    s += sum(As .* fermi .* Wω) * el.weights[i]
-                end
-                (s + el.nstates_base) * occ.spin_degeneracy
+            for iT in 1:nT, i in 1:n
+                Σs_new[:, i, iT] .+= K_re * imag.(Σs_new[:, i, iT])
             end
-            n_target = occ.nlist[iT] + occ.nelec
-            μlist[iT] = find_zero(μ -> nocc(μ) - n_target, extrema(ωs_spectral) .+ (-0.1, 0.1))
+            Σs = Σs_new
+            # Metal branch of `compute_occupation!`.
+            Σs_spectral = on_spectral(Σs)
+            # Trapezoid weights: half the distance between the neighbouring nodes.
+            Wω = [(ωs_spectral[min(r + 1, end)] - ωs_spectral[max(r - 1, 1)]) / 2
+                  for r in eachindex(ωs_spectral)]
+            for iT in 1:nT
+                T = occ.Tlist[iT]
+                function nocc(μ)
+                    fermi = [occ_f(ω - μ, T) for ω in ωs_spectral]
+                    s = 0.0
+                    for i in 1:n
+                        As = @. -imag(1 / (ωs_spectral - el.es[i] - Σs_spectral[:, i, iT])) / π
+                        s += sum(As .* fermi .* Wω) * el.weights[i]
+                    end
+                    (s + el.nstates_base) * occ.spin_degeneracy
+                end
+                n_target = occ.nlist[iT] + occ.nelec
+                μlist[iT] = find_zero(μ -> nocc(μ) - n_target, extrema(ωs_spectral) .+ (-0.1, 0.1))
+            end
         end
+        Σs, μlist
     end
-    Σs, μlist
-end
 
-@testset "scGD0 pb against the v2 reference" begin
     (; model, nk, window, ωs, ωs_spectral, occ, η_init, η_min) = pb_scgd0_fixture()
 
     # Two iterations with the μ update, never converged (tol = 0).

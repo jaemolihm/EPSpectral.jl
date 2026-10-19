@@ -1,46 +1,17 @@
-using Test
-using EPSpectral
-using ElectronPhonon
-using LinearAlgebra: norm
-using JLD2: jldopen
-using Interpolations: interpolate, extrapolate, Gridded, Linear, Flat
-const EP = ElectronPhonon
+using TestItemRunner
 
-# Optional GPU dependency for the CPU-vs-GPU testsets (skipped if absent).
+# `Pkg.test(; test_args = ["test_frequency_grids.jl", ...])` runs only the test items in the named
+# files. The items tagged `:gpu` run only when CUDA is functional (CI drops it from the test target).
+for file in ARGS
+    isfile(joinpath(@__DIR__, file)) || error("unknown test file $file")
+end
 const HAVE_CUDA = try
     @eval using CUDA
     CUDA.functional()
 catch
     false
 end
-HAVE_CUDA && CUDA.allowscalar(false)
+HAVE_CUDA || @info "CUDA not functional: skipping the test items tagged :gpu"
 
-# Deterministic test data in [-1, 1], without a Random dependency.
-pseudorandom(dims...; seed) = reshape(sin.(seed .* (1:prod(dims)) .^ 1.5), dims)
-pseudorandom_complex(dims...; seed) =
-    complex.(pseudorandom(dims...; seed), pseudorandom(dims...; seed = seed + 0.5))
-
-include("holstein_1d_reference.jl")
-include("pb_fixture.jl")
-include("ladder_fixtures.jl")
-
-@testset "EPSpectral.jl" begin
-    include("test_kramers_kronig.jl")
-    include("test_frequency_grids.jl")
-    include("test_scgd0_kernel.jl")
-    include("test_scgd0_mu.jl")
-    include("test_scgd0_loop.jl")
-    include("test_scgd0_holstein.jl")
-    include("test_scgd0_spectral_grid.jl")
-    include("test_scgd0_pb.jl")
-    include("test_ladder_bubble.jl")
-    include("test_ladder_kernel.jl")
-    include("test_ladder_holstein.jl")
-    include("test_ladder_pb.jl")
-    if HAVE_CUDA
-        include("test_scgd0_gpu.jl")
-        include("test_ladder_gpu.jl")
-    else
-        @info "CUDA not functional: skipping the CPU-vs-GPU testsets"
-    end
-end
+@run_package_tests filter = ti -> (isempty(ARGS) || basename(ti.filename) in ARGS) &&
+    (HAVE_CUDA || :gpu ∉ ti.tags)

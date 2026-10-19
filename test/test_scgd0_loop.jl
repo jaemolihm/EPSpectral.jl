@@ -1,7 +1,7 @@
 # `_loop_scgd0` on hand-built 1D Holstein input (see `holstein_1d_loop_setup`), for what a run of
 # `run_scgd0` on the Holstein `Model` cannot reach: an unconverged maxiter, a μ with no root, and a
 # multiplet average that changes Σ (the Holstein Σ is k-independent).
-@testset "scGD0 loop, 1D Holstein by hand" begin
+@testitem "scGD0 loop, 1D Holstein by hand" setup = [Common] begin
     nk, t, ω0, g2, T = 64, 1.0, 0.2, 0.2, 0.1
     ωs = FrequencyGrid(collect(-4.0:0.02:4.0))
     η_init, tol = 0.05, 1e-6

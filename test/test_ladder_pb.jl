@@ -1,7 +1,7 @@
 # The ladder on the pb window (multiple modes, IBZ with the TR-odd unfolding): the two solvers
 # save/load and the stored vertex, and the argument checks of `run_scgd0_ladder`.
 
-@testset "ladder pb" begin
+@testitem "ladder pb" setup = [Common] begin
     eV = unit_to_aru(:eV)
     pb = pb_ladder_case()
     (; model, nk, window, occ, res) = pb

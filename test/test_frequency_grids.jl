@@ -1,4 +1,4 @@
-@testset "Frequency grids" begin
+@testitem "Frequency grids" setup = [Common] begin
     # Nonuniform output grid (the SrVO3 grid, in eV around E_F) and the default spectral grid.
     ωs = collect(vcat(-0.35:0.02:-0.11, -0.099:0.001:0.100, 0.12:0.02:0.34))
     grid = FrequencyGrid(ωs)

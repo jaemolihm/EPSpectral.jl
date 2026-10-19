@@ -38,7 +38,7 @@ jobs:
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v3
       # GitHub runners have no GPU: drop CUDA from the test target so Pkg.test neither installs
-      # nor precompiles it. The GPU testsets load CUDA in a try/catch and skip without it.
+      # nor precompiles it. runtests.jl loads CUDA in a try/catch and skips the :gpu test items.
       - name: Drop CUDA from the test target
         shell: julia --color=yes {0}
         run: |

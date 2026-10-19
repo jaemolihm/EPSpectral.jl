@@ -1,7 +1,7 @@
 # The ladder on the 1D Holstein chain (constant g2 and ω0, ωs step below ω0): the vertex correction
 # of the current vanishes identically, and the density vertex measures the Ward identity.
 
-@testset "ladder 1D Holstein" begin
+@testitem "ladder 1D Holstein" setup = [Common] begin
     @testset "current vertex correction vanishes" begin
         case = holstein_ladder_case()
         (; ladder, res, model, nk, window, occ) = case

@@ -21,6 +21,7 @@ CUDA = "6"
 Krylov = "0.10"
 LinearMaps = "3"
 OhMyThreads = "0.7, 0.8"
+TestItemRunner = "1"
 julia = "1.11"
 
 [extras]
@@ -28,6 +29,7 @@ CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 
 [targets]
-test = ["CUDA", "Interpolations", "Pkg", "Test"]
+test = ["CUDA", "Interpolations", "Pkg", "Test", "TestItemRunner"]

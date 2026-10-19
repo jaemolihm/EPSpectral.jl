@@ -1,59 +1,58 @@
 # The ladder kernel on the host: the shift tables, and one application
 # of the kernel `apply_ladder_kernel!` against a naive loop over (i, f, ν, j) that evaluates the shifted
 # vertex by exact hat-basis interpolation at ωs[j] ± ω_q, with no shift grid.
-
-# Linear interpolation of y on the sorted grid ωs, zero outside.
-function hat_value(y, ωs, x)
-    (x < ωs[1] || x > ωs[end]) && return zero(y[1])
-    k = min(searchsortedlast(ωs, x), length(ωs) - 1)
-    t = (x - ωs[k]) / (ωs[k+1] - ωs[k])
-    (1 - t) * y[k] + t * y[k+1]
-end
-
-# L(J) = -Gm (s ⊙ K[J]) Gp by loops, with the channel sums of `apply_phonon_exchange_kernel!`.
-function naive_apply_ladder(ladder, J, Gm, Gp, T, ω_acoustic)
-    (; g2, ωph, iq_kk, iks_i, iks_f, w_f, f_to_i, R, ωs, KK) = ladder
-    nm, ni, nf = size(g2)
-    nω = length(ωs)
-    ωq = zeros(nm, nf, ni)
-    EP.gather_pair_table!(ωq, ωph, transpose(iq_kk), iks_f, iks_i)
-    # The rotated vertex of every inner state.
-    F = zeros(ComplexF64, nω, 4, 3, 2, nf)
-    for f in 1:nf, c0 in 1:2, a in 1:3, c12 in 1:4
-        F[:, c12, a, c0, f] = sum(R[a, b, f] * J[:, c12, b, c0, f_to_i[f]] for b in 1:3)
+@testitem "ladder kernel" setup = [Common] begin
+    # Linear interpolation of y on the sorted grid ωs, zero outside.
+    function hat_value(y, ωs, x)
+        (x < ωs[1] || x > ωs[end]) && return zero(y[1])
+        k = min(searchsortedlast(ωs, x), length(ωs) - 1)
+        t = (x - ωs[k]) / (ωs[k+1] - ωs[k])
+        (1 - t) * y[k] + t * y[k+1]
     end
-    Up, Um, Vp, Vm = (zeros(ComplexF64, nω, 4, 3, 2, ni) for _ in 1:4)
-    for i in 1:ni, f in 1:nf, ν in 1:nm
-        ωq[ν, f, i] < ω_acoustic && continue
-        w = w_f[f] * g2[ν, i, f]
-        n = EPSpectral.occ_boson(ωq[ν, f, i], T)
-        for c0 in 1:2, a in 1:3, c12 in 1:4, j in 1:nω
-            y = view(F, :, c12, a, c0, f)
-            up = w * hat_value(y, ωs, ωs[j] + ωq[ν, f, i])
-            um = w * hat_value(y, ωs, ωs[j] - ωq[ν, f, i])
-            Up[j, c12, a, c0, i] += up
-            Um[j, c12, a, c0, i] += um
-            Vp[j, c12, a, c0, i] += n * up
-            Vm[j, c12, a, c0, i] += n * um
+
+    # L(J) = -Gm (s ⊙ K[J]) Gp by loops, with the channel sums of `apply_phonon_exchange_kernel!`.
+    function naive_apply_ladder(ladder, J, Gm, Gp, T, ω_acoustic)
+        (; g2, ωph, iq_kk, iks_i, iks_f, w_f, f_to_i, R, ωs, KK) = ladder
+        nm, ni, nf = size(g2)
+        nω = length(ωs)
+        ωq = zeros(nm, nf, ni)
+        EP.gather_pair_table!(ωq, ωph, transpose(iq_kk), iks_f, iks_i)
+        # The rotated vertex of every inner state.
+        F = zeros(ComplexF64, nω, 4, 3, 2, nf)
+        for f in 1:nf, c0 in 1:2, a in 1:3, c12 in 1:4
+            F[:, c12, a, c0, f] = sum(R[a, b, f] * J[:, c12, b, c0, f_to_i[f]] for b in 1:3)
         end
+        Up, Um, Vp, Vm = (zeros(ComplexF64, nω, 4, 3, 2, ni) for _ in 1:4)
+        for i in 1:ni, f in 1:nf, ν in 1:nm
+            ωq[ν, f, i] < ω_acoustic && continue
+            w = w_f[f] * g2[ν, i, f]
+            n = EPSpectral.occ_boson(ωq[ν, f, i], T)
+            for c0 in 1:2, a in 1:3, c12 in 1:4, j in 1:nω
+                y = view(F, :, c12, a, c0, f)
+                up = w * hat_value(y, ωs, ωs[j] + ωq[ν, f, i])
+                um = w * hat_value(y, ωs, ωs[j] - ωq[ν, f, i])
+                Up[j, c12, a, c0, i] += up
+                Um[j, c12, a, c0, i] += um
+                Vp[j, c12, a, c0, i] += n * up
+                Vm[j, c12, a, c0, i] += n * um
+            end
+        end
+        KY = reshape(KK * reshape((Up .- Um) ./ 2, nω, :), size(Up))
+        LJ = zeros(ComplexF64, nω, 4, 3, 2, ni)
+        s = [1 -1; -1 1]
+        for i in 1:ni, c0 in 1:2, a in 1:3, j in 1:nω
+            k11 = -im * KY[j, 1, a, c0, i] - (Up[j, 1, a, c0, i] + Um[j, 1, a, c0, i]) / 2 -
+                  (Vp[j, 1, a, c0, i] + Vm[j, 1, a, c0, i])
+            k22 = im * KY[j, 4, a, c0, i] - (Up[j, 4, a, c0, i] + Um[j, 4, a, c0, i]) / 2 -
+                  (Vp[j, 4, a, c0, i] + Vm[j, 4, a, c0, i])
+            k21 = -(Vp[j, 2, a, c0, i] + Um[j, 2, a, c0, i] + Vm[j, 2, a, c0, i])
+            k12 = -(Up[j, 3, a, c0, i] + Vp[j, 3, a, c0, i] + Vm[j, 3, a, c0, i])
+            Kab = s .* [k11 k12; k21 k22]
+            LJ[j, :, a, c0, i] = -vec(reshape(Gm[j, :, i], 2, 2) * Kab * reshape(Gp[j, :, i], 2, 2))
+        end
+        LJ
     end
-    KY = reshape(KK * reshape((Up .- Um) ./ 2, nω, :), size(Up))
-    LJ = zeros(ComplexF64, nω, 4, 3, 2, ni)
-    s = [1 -1; -1 1]
-    for i in 1:ni, c0 in 1:2, a in 1:3, j in 1:nω
-        k11 = -im * KY[j, 1, a, c0, i] - (Up[j, 1, a, c0, i] + Um[j, 1, a, c0, i]) / 2 -
-              (Vp[j, 1, a, c0, i] + Vm[j, 1, a, c0, i])
-        k22 = im * KY[j, 4, a, c0, i] - (Up[j, 4, a, c0, i] + Um[j, 4, a, c0, i]) / 2 -
-              (Vp[j, 4, a, c0, i] + Vm[j, 4, a, c0, i])
-        k21 = -(Vp[j, 2, a, c0, i] + Um[j, 2, a, c0, i] + Vm[j, 2, a, c0, i])
-        k12 = -(Up[j, 3, a, c0, i] + Vp[j, 3, a, c0, i] + Vm[j, 3, a, c0, i])
-        Kab = s .* [k11 k12; k21 k22]
-        LJ[j, :, a, c0, i] = -vec(reshape(Gm[j, :, i], 2, 2) * Kab * reshape(Gp[j, :, i], 2, 2))
-    end
-    LJ
-end
 
-@testset "ladder kernel" begin
     @testset "one regrouped shift against the direct interpolation" begin
         ωs = FrequencyGrid(vcat(-1.0:0.1:-0.4, -0.35:0.05:0.35, 0.4:0.1:1.0))
         h, nshift = ωs.dω_unit, 13

@@ -1,6 +1,6 @@
 # The grid ωs_spectral of `run_scgd0`: its default, its validation, a graded grid against a fine
 # uniform one on the 1D Holstein chain (μ and min_i ∫A_i), and the JLD2 round trip of both grids.
-@testset "scGD0 spectral grid" begin
+@testitem "scGD0 spectral grid" setup = [Common] begin
     t, λ, ω0, nk, T = 1.0, 0.5, 0.2, 64, 0.1
     model = EP.holstein_model(; t, λ, ω₀ = ω0, dimension = 1, verbose = false)
     ωs = FrequencyGrid(collect(-4.0:0.02:4.0))

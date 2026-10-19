@@ -1,7 +1,10 @@
 # The ladder on the GPU against the host, on the pb window: first on one shared setup, then end to
 # end. Runs under `CUDA.allowscalar(false)`, so every step is a device-generic broadcast, reduction
 # or GEMM.
-@testset "ladder CPU vs GPU" begin
+@testitem "ladder CPU vs GPU" tags = [:gpu] setup = [Common] begin
+    using CUDA
+    CUDA.allowscalar(false)
+
     eV = unit_to_aru(:eV)
     pb = pb_ladder_case()
     (; model, nk, window, occ, res) = pb
