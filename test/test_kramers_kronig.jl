@@ -1,4 +1,4 @@
-@testset "kramers_kronig single pole" begin
+@testitem "kramers_kronig single pole" setup = [Common] begin
     # A single pole f(ω) = 1/(ω - ε + iη), analytic in the upper half plane: Re f and Im f are
     # each the Kramers-Kronig transform of the other (up to sign). The grid truncation at ±40 and
     # the piecewise-linear interpolation of f near the pole (error ~ dω^2 |f''| / 8 = 0.1 at the

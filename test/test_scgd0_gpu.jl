@@ -1,6 +1,9 @@
 # The scGD0 iteration on the GPU against the host, on the pb window of `pb_fixture.jl`: first on
 # one shared setup, then end to end.
-@testset "scGD0 CPU vs GPU" begin
+@testitem "scGD0 CPU vs GPU" tags = [:gpu] setup = [Common] begin
+    using CUDA
+    CUDA.allowscalar(false)
+
     (; model, nk, window, ωs, ωs_spectral, occ, η_init, η_min) = pb_scgd0_fixture()
     gpu = EP.gpu_backend()
     # Three iterations with the μ update, never converged (tol = 0). `run_scgd0` passes the same.

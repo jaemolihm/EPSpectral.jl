@@ -1,6 +1,6 @@
 # The carrier count of the μ solve: n(μ) from the spectral DOS D_T against the old per-state
 # formula (`compute_occupation!` of the v2 solver) with the trapezoid rule, transcribed below.
-@testset "scGD0 carrier count" begin
+@testitem "scGD0 carrier count" setup = [Common] begin
     # n(μ) of the old code: per state, the trapezoid-rule ∫A f (electrons) or ∫A (1 - f) (holes,
     # counted as filled minus holes) on the spectral grid, summed with the state weights.
     trapezoid(ωs) = [(ωs[min(r + 1, end)] - ωs[max(r - 1, 1)]) / 2 for r in eachindex(ωs)]

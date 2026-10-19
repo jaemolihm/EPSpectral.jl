@@ -1,4 +1,4 @@
-@testset "scGD0 kernel" begin
+@testitem "scGD0 kernel" setup = [Common] begin
     @testset "add_fan_migdal_imsigma!" begin
         # The broadcast reduction (threaded over i on the host) against a plain loop over
         # (ω, ν, i, f) on non-constant data: per-pair ωq, one mode below ω_acoustic with an

@@ -4,44 +4,43 @@
 # temperatures each. The reference reads Σ with
 # Interpolations.jl and forms A_i = -Im Gᴿ/π and the Fermi functions itself, so nothing is shared
 # with the contour Green's functions beyond the input Σ.
-
-# The bubble from spectral functions: σ_ab = π Σ_i w_i v_a v_b Σ_ε Wω[ε] A_i(ε - Ω/2) A_i(ε + Ω/2)
-# (f(ε - Ω/2 - μ) - f(ε + Ω/2 - μ))/Ω, with -∂f/∂ε = f(1 - f)/T at Ω = 0.
-function spectral_bubble(res, iT, Ω)
-    (; ωs, el_i) = res
-    T, μ = res.Tlist[iT], res.μ[iT]
-    f(x) = 1 / (exp(x / T) + 1)
-    Wω = EPSpectral.trapezoid_weights(ωs)
-    σ = zeros(3, 3)
-    for i in 1:el_i.n
-        Σ = extrapolate(interpolate((ωs,), res.Σ[:, i, iT], Gridded(Linear())), Flat())
-        A(ω) = -imag(1 / (ω - el_i.es[i] - Σ(ω))) / π
-        window = sum(Wω[j] * A(ωs[j] - Ω / 2) * A(ωs[j] + Ω / 2) *
-            (iszero(Ω) ? f(ωs[j] - μ) * (1 - f(ωs[j] - μ)) / T :
-                          (f(ωs[j] - Ω / 2 - μ) - f(ωs[j] + Ω / 2 - μ)) / Ω)
-            for j in eachindex(ωs))
-        σ .+= π * state_weights(el_i)[i] * window .* (el_i.vs[i] * el_i.vs[i]')
+@testitem "ladder bubble from the contour" setup = [Common] begin
+    # The bubble from spectral functions: σ_ab = π Σ_i w_i v_a v_b Σ_ε Wω[ε] A_i(ε - Ω/2) A_i(ε + Ω/2)
+    # (f(ε - Ω/2 - μ) - f(ε + Ω/2 - μ))/Ω, with -∂f/∂ε = f(1 - f)/T at Ω = 0.
+    function spectral_bubble(res, iT, Ω)
+        (; ωs, el_i) = res
+        T, μ = res.Tlist[iT], res.μ[iT]
+        f(x) = 1 / (exp(x / T) + 1)
+        Wω = EPSpectral.trapezoid_weights(ωs)
+        σ = zeros(3, 3)
+        for i in 1:el_i.n
+            Σ = extrapolate(interpolate((ωs,), res.Σ[:, i, iT], Gridded(Linear())), Flat())
+            A(ω) = -imag(1 / (ω - el_i.es[i] - Σ(ω))) / π
+            window = sum(Wω[j] * A(ωs[j] - Ω / 2) * A(ωs[j] + Ω / 2) *
+                (iszero(Ω) ? f(ωs[j] - μ) * (1 - f(ωs[j] - μ)) / T :
+                              (f(ωs[j] - Ω / 2 - μ) - f(ωs[j] + Ω / 2 - μ)) / Ω)
+                for j in eachindex(ωs))
+            σ .+= π * state_weights(el_i)[i] * window .* (el_i.vs[i] * el_i.vs[i]')
+        end
+        σ
     end
-    σ
-end
 
-# σ_bubble through the package: Σ gathered at ωs ∓ Ω/2, contour G, J0, contraction.
-function contour_bubble(res, iT, Ω)
-    (; ωs, el_i) = res
-    ni = el_i.n
-    Σd_m, Σd_p = (similar(res.Σ[:, :, iT]) for _ in 1:2)
-    EPSpectral.apply_interpolation_table!(Σd_m, res.Σ[:, :, iT], EPSpectral.linear_interpolation_table(ωs, ωs .- Ω / 2)...)
-    EPSpectral.apply_interpolation_table!(Σd_p, res.Σ[:, :, iT], EPSpectral.linear_interpolation_table(ωs, ωs .+ Ω / 2)...)
-    Gm, Gp = (zeros(ComplexF64, length(ωs), 4, ni) for _ in 1:2)
-    EPSpectral.contour_greens!(Gm, Gp, el_i.es, Σd_m, Σd_p, ωs, Ω, res.μ[iT], res.Tlist[iT])
-    v = reduce(hcat, el_i.vs)
-    J0 = zeros(ComplexF64, length(ωs), 4, 3, 2, ni)
-    EPSpectral.attach_greens_to_bare_vertex!(J0, Gm, v, Gp)
-    ωs_weights = EPSpectral.trapezoid_weights(ωs)
-    EPSpectral.conductivity_from_vertex(J0, v, state_weights(el_i), ωs_weights, Ω, res.Tlist[iT])
-end
+    # σ_bubble through the package: Σ gathered at ωs ∓ Ω/2, contour G, J0, contraction.
+    function contour_bubble(res, iT, Ω)
+        (; ωs, el_i) = res
+        ni = el_i.n
+        Σd_m, Σd_p = (similar(res.Σ[:, :, iT]) for _ in 1:2)
+        EPSpectral.apply_interpolation_table!(Σd_m, res.Σ[:, :, iT], EPSpectral.linear_interpolation_table(ωs, ωs .- Ω / 2)...)
+        EPSpectral.apply_interpolation_table!(Σd_p, res.Σ[:, :, iT], EPSpectral.linear_interpolation_table(ωs, ωs .+ Ω / 2)...)
+        Gm, Gp = (zeros(ComplexF64, length(ωs), 4, ni) for _ in 1:2)
+        EPSpectral.contour_greens!(Gm, Gp, el_i.es, Σd_m, Σd_p, ωs, Ω, res.μ[iT], res.Tlist[iT])
+        v = reduce(hcat, el_i.vs)
+        J0 = zeros(ComplexF64, length(ωs), 4, 3, 2, ni)
+        EPSpectral.attach_greens_to_bare_vertex!(J0, Gm, v, Gp)
+        ωs_weights = EPSpectral.trapezoid_weights(ωs)
+        EPSpectral.conductivity_from_vertex(J0, v, state_weights(el_i), ωs_weights, Ω, res.Tlist[iT])
+    end
 
-@testset "ladder bubble from the contour" begin
     @testset "contour Green's function identities" begin
         f(x, T) = 1 / (exp(x / T) + 1)
         for (ω, ε, Σ, μ, T) in ((0.3, -0.1, -0.02 - 0.05im, 0.05, 0.1),
