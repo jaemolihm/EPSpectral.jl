@@ -20,8 +20,8 @@
         value : EP.to_device(gpu, value)
     names = keys(pb.setup)
     setup_device = NamedTuple{names}(map(on_device, names, values(pb.setup)))
-    device_ladder(dω_shift) = EPSpectral._setup_ladder(setup_device, res, pb.symmetry; dω_shift,
-        backend = gpu)
+    device_ladder(k) = EPSpectral._setup_ladder(setup_device, with_ωs(res, refine(res.ωs, k)),
+        pb.symmetry; backend = gpu)
 
     @testset "loop on one shared setup" begin
         # The only place a device loop sees host-extracted data, which `run_scgd0_ladder` never
@@ -29,9 +29,9 @@
         # mode is 0 or -1 on this fixture) and a quarter of it (up to 3), and run-to-run
         # reproducibility of each. The device and host iterations stop after the same number of
         # steps; the solutions then differ by round-off (measured below 2e-15, on an A100).
-        for dω_shift in (pb.dω_shift, pb.dω_shift / 4)
-            host = run_loop(with_shift_step(pb, dω_shift).ladder, EP.CPUBackend())
-            ladder_dev = device_ladder(dω_shift)
+        for k in (1, 4)
+            host = run_loop(with_finer_shift_step(pb, k).ladder, EP.CPUBackend())
+            ladder_dev = device_ladder(k)
             for gpu_tile in (nothing, 7)
                 # `gpu_tile` forces streaming, and the small g2 is resident otherwise.
                 workspace = EPSpectral._ladder_workspace(ladder_dev, gpu, gpu_tile, 0)
@@ -53,7 +53,7 @@
         # The fixed point, streamed. Ω > 0 only: it diverges at the DC point of this fixture.
         fixed_kwargs = (; solver = :fixed_point, rtol = 1e-6, maxiter = 200, Ωs = Ωs[2:2])
         host = run_loop(pb.ladder, EP.CPUBackend(); fixed_kwargs...)
-        dev = run_loop(device_ladder(pb.dω_shift), gpu; gpu_tile = 7, fixed_kwargs...)
+        dev = run_loop(device_ladder(1), gpu; gpu_tile = 7, fixed_kwargs...)
         @test dev.niter == host.niter && all(dev.converged)
         @test rel(dev.σ_ladder, host.σ_ladder) <= 1e-10
     end

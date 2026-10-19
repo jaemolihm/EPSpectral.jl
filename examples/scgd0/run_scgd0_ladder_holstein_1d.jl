@@ -16,8 +16,7 @@ begin
     use_gpu = false
     nk = 32
     window = (-Inf, Inf)
-    # Every node of ωs is a multiple of the shift step minimum(diff(ωs)) from the first one.
-    ωs = collect(-4.0:0.02:4.0)
+    ωs = FrequencyGrid(-4.0:0.02:4.0)
     occ = ElectronOccupationParams(; Tlist = [0.1, 0.2], nlist = 0.0, nelec = 1,
         volume = model.volume, spin_degeneracy = 2, type = :Metal)
     Ωs = [0.0, 0.1, 0.3]

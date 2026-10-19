@@ -21,7 +21,7 @@ The result of [`run_scgd0_ladder`](@ref), for the probe frequencies `Ωs` and th
   residual norms of the Krylov iteration and `σ_iter` is empty; for `:fixed_point`, `σ_iter` holds
   the unsymmetrized conductivity (without `spin_degeneracy / volume`) after every iteration and
   `norms` is empty.
-- `dω_shift`: the shift-grid step used.
+- `dω_unit`: the step of the shift tables, `scgd0.ωs.dω_unit`.
 - `J[ω, c12, cart, c0, i, Ω, T]`: the dressed vertex, or `nothing` unless `store_vertex = true`.
 """
 struct SCGD0LadderResult{FT}
@@ -33,7 +33,7 @@ struct SCGD0LadderResult{FT}
     converged::Matrix{Bool}
     niter::Matrix{Int}
     history::Matrix{NamedTuple{(:norms, :σ_iter), Tuple{Vector{FT}, Vector{Matrix{FT}}}}}
-    dω_shift::FT
+    dω_unit::FT
     J::Union{Nothing, Array{Complex{FT}, 7}}
 end
 
@@ -48,11 +48,10 @@ by the ladder of the scGD0 coupling, `J = J0 + L(J)` on the 2x2 Keldysh contour 
 Self-energy, chemical potential and temperatures come from `scgd0`; the e-ph coupling is extracted
 again for the same `model`, `nk` and `window`, which must give the same states as `scgd0.el_i`.
 
-`ωs = scgd0.ωs` must be commensurate with the shift step `dω_shift`, which is derived from it: the
-largest step `minimum(diff(ωs)) / k` with the smallest `k <= 64` on which every node lies on
-`ωs[1] + dω_shift ℤ` ([`ladder_shift_step`](@ref)); the cost grows as `1 / dω_shift`. The step used
-is returned in the result. [`graded_frequency_grid`](@ref) builds commensurate graded grids. `occ` supplies
-`spin_degeneracy` and `volume`, and its `Tlist` must equal `scgd0.Tlist`.
+The shift tables of the ladder have the step `dω_unit` of the [`FrequencyGrid`](@ref)
+`scgd0.ωs`, returned in the result; the cost grows as `1 / dω_unit`, so a grid should carry the
+largest commensurate step. `occ` supplies `spin_degeneracy` and `volume`, and its `Tlist` must
+equal `scgd0.Tlist`.
 The linear problem is solved for each `(T, Ω)` in turn by
 `solver = :gmres` (warm-started from the previous `Ω` at the same `T`; residual below `rtol` times
 the norm of `J0`, at most `maxiter` iterations) or `solver = :fixed_point` (from `J0`,
@@ -80,14 +79,14 @@ function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
     (length(occ.Tlist) == length(scgd0.Tlist) && occ.Tlist ≈ scgd0.Tlist) || throw(ArgumentError(
         "occ.Tlist = $(occ.Tlist) must equal the temperatures of scgd0, $(scgd0.Tlist)"))
 
-    setup = _setup_scgd0(model, nk, window, occ; ωs = scgd0.ωs, dω_dense = minimum(diff(scgd0.ωs)),
-        backend, symmetry, verbosity, electron_degen_cutoff, ep_kwargs...)
+    setup = _setup_scgd0(model, nk, window, occ; ωs = scgd0.ωs, scgd0.ωs_spectral, backend,
+        symmetry, verbosity, electron_degen_cutoff, ep_kwargs...)
     el_new, el_old = setup.el_i, scgd0.el_i
     (el_new.iks == el_old.iks && el_new.ibands == el_old.ibands &&
      isapprox(el_new.es, el_old.es; rtol = 1e-10)) || throw(ArgumentError(
         "the states of the new extraction differ from scgd0.el_i: run_scgd0_ladder needs the " *
         "same model, nk, window and symmetry as the run that produced scgd0"))
-    ladder = _setup_ladder(setup, scgd0, symmetry; backend, verbosity)
+    ladder = _setup_ladder(setup, scgd0, symmetry; backend)
     res = _loop_ladder(ladder, scgd0.Σ, scgd0.μ, scgd0.Tlist, collect(FT, Ωs); solver, rtol,
         maxiter, store_vertex, backend, gpu_tile, ω_acoustic, verbosity)
 
@@ -102,21 +101,19 @@ function run_scgd0_ladder(model::Model{FT}, nk, window, scgd0::SCGD0Result;
     end
     SCGD0LadderResult(collect(FT, Ωs), collect(FT, scgd0.Tlist), collect(FT, scgd0.μ),
         to_symmetrized_σ(res.σ_bubble), to_symmetrized_σ(res.σ_ladder), res.converged, res.niter, res.history,
-        ladder.dω_shift, res.J)
+        ladder.dω_unit, res.J)
 end
 
 # What the ladder needs on top of the `_setup_scgd0` fields: the rotation R[:, :, f] and IBZ
 # representative of every inner state (the averaged vector unfolding of ElectronPhonon, TR-odd, as
 # a dense array) and the inner states grouped by representative, the hat-basis shift tables on the
-# commensurate `ωs` (`nshift` tables of step `dω_shift`, the last one always zero), the quadrature
-# weights and the band velocities v[cart, i]. `dω_shift = nothing` derives the step
-# ([`ladder_shift_step`](@ref)); an explicit one is checked.
-# `symmetry === nothing` has no rotation.
-function _setup_ladder(setup, scgd0, symmetry; dω_shift = nothing, backend, verbosity = 0)
+# `ωs` (`nshift` tables of step `ωs.dω_unit`, the last one always zero), the quadrature
+# weights and the band velocities v[cart, i]. `symmetry === nothing` has no rotation.
+function _setup_ladder(setup, scgd0, symmetry; backend)
     (; el_i, el_f, ωph) = setup
     FT = eltype(setup.g2)
     ωs = scgd0.ωs
-    dω_shift = ladder_shift_step(ωs, dω_shift; verbosity)
+    (; dω_unit) = ωs
 
     nf = el_f.n
     f_to_i = Array(setup.f_to_i)
@@ -151,12 +148,12 @@ function _setup_ladder(setup, scgd0, symmetry; dω_shift = nothing, backend, ver
     end
     inner_star_ptr = cumsum([1; star_sizes])
 
-    nshift = ceil(Int, maximum(ωph) / dω_shift) + 2
-    klo, wlo, whi = vertex_shift_tables(ωs, FT(dω_shift), nshift)
+    nshift = ceil(Int, maximum(ωph) / dω_unit) + 2
+    klo, wlo, whi = vertex_shift_tables(ωs, nshift)
     (; setup..., inner_states_by_star, inner_star_ptr, R = to_device(backend, R),
        klo = to_device(backend, klo), wlo = to_device(backend, wlo), whi = to_device(backend, whi), nshift,
-       dω_shift = FT(dω_shift),
-       Wω = to_device(backend, trapezoid_weights(ωs)),
+       dω_unit = FT(dω_unit),
+       ωs_weights = to_device(backend, trapezoid_weights(ωs)),
        v = to_device(backend, reduce(hcat, el_i.vs)))
 end
 
@@ -246,7 +243,7 @@ combination ([`apply_phonon_exchange_kernel!`](@ref)). `ladder` is the output of
 `workspace` that of `_ladder_workspace`. Modes below `ω_acoustic` are skipped.
 """
 @views function apply_ladder_kernel!(LJ, J, ladder, workspace, Gm, Gp, T; ω_acoustic)
-    (; g2, ωph, iq_kk, iks_i, R, klo, wlo, whi, KK, ωs, nshift, dω_shift) = ladder
+    (; g2, ωph, iq_kk, iks_i, R, klo, wlo, whi, KK, ωs, nshift, dω_unit) = ladder
     (; chunks, streamed, g2_dev, g2_stage, ωq_buf, nB_buf, B_buf, Bt_buf, X_buf, Cp, Cm, Y, KY, KJ) =
         workspace
     nm, ni, _ = size(g2)
@@ -274,10 +271,10 @@ combination ([`apply_phonon_exchange_kernel!`](@ref)). `ladder` is the output of
                 end
             end
             copyto!(g2_dev, 1, g2_stage, 1, nm * ni * nf)
-            bin_coupling_on_shift_grid!(B, g2_dev, Base.OneTo(nf), ωq, nB, w_f, dω_shift, ω_acoustic)
+            bin_coupling_on_shift_grid!(B, g2_dev, Base.OneTo(nf), ωq, nB, w_f, dω_unit, ω_acoustic)
         else
             # Resident: indexed in place.
-            bin_coupling_on_shift_grid!(B, g2_dev, fidx, ωq, nB, w_f, dω_shift, ω_acoustic)
+            bin_coupling_on_shift_grid!(B, g2_dev, fidx, ωq, nB, w_f, dω_unit, ω_acoustic)
         end
         Bt = reshape_buffer_view(Bt_buf, dims.Bt...)
         star_sum_coupling!(Bt, B, R, fidx, star_ptr)
@@ -305,7 +302,7 @@ end
 # `niter[Ω, T]`, `history[Ω, T]` and the vertex `J` (`nothing` unless `store_vertex`).
 function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_vertex, backend,
         gpu_tile, ω_acoustic, verbosity)
-    (; ωs, ε_i, w_i, Wω, v) = ladder
+    (; ωs, ε_i, w_i, ωs_weights, v) = ladder
     FT = eltype(ladder.g2)
     nω, ni, nT = size(Σ)
     nΩ = length(Ωs)
@@ -336,7 +333,7 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
             shifted_Σ!(Σd_p, Σ_T, Array(ωs) .+ Ω / 2)
             contour_greens!(Gm, Gp, ε_i, Σd_m, Σd_p, ωs, Ω, μ[iT], T)
             attach_greens_to_bare_vertex!(J0, Gm, v, Gp)
-            σ_bubble[:, :, iΩ, iT] = conductivity_from_vertex(J0, v, w_i, Wω, Ω, T)
+            σ_bubble[:, :, iΩ, iT] = conductivity_from_vertex(J0, v, w_i, ωs_weights, Ω, T)
             ladder_kernel_TΩ!(LJ_, J_) =
                 apply_ladder_kernel!(LJ_, J_, ladder, workspace, Gm, Gp, T; ω_acoustic)
 
@@ -361,7 +358,7 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
                 for iter in 1:maxiter
                     ladder_kernel_TΩ!(LJ, J)
                     J .= J0 .+ LJ
-                    push!(σ_iter, conductivity_from_vertex(J, v, w_i, Wω, Ω, T))
+                    push!(σ_iter, conductivity_from_vertex(J, v, w_i, ωs_weights, Ω, T))
                     niter[iΩ, iT] = iter
                     if iter > 1 && norm(σ_iter[end] - σ_iter[end-1]) < rtol * norm(σ_iter[end])
                         converged[iΩ, iT] = true
@@ -370,7 +367,7 @@ function _loop_ladder(ladder, Σ, μ, Tlist, Ωs; solver, rtol, maxiter, store_v
                 end
                 history[iΩ, iT] = (; norms = FT[], σ_iter)
             end
-            σ_ladder[:, :, iΩ, iT] = conductivity_from_vertex(J, v, w_i, Wω, Ω, T)
+            σ_ladder[:, :, iΩ, iT] = conductivity_from_vertex(J, v, w_i, ωs_weights, Ω, T)
             store_vertex && (J_all[:, :, :, :, :, iΩ, iT] = Array(J))
             verbosity > 0 && @info "ladder T = $T, Ω = $Ω" solver niter = niter[iΩ, iT] converged = (
                 converged[iΩ, iT]) wall = time() - t0
@@ -389,7 +386,7 @@ Write `res` to a JLD2 file, with `J` only if it is stored and `history` as the g
 """
 function save_scgd0_ladder(filename, res::SCGD0LadderResult)
     jldopen(filename, "w") do file
-        for name in (:Ωs, :Tlist, :μ, :σ_bubble, :σ_ladder, :converged, :niter, :dω_shift)
+        for name in (:Ωs, :Tlist, :μ, :σ_bubble, :σ_ladder, :converged, :niter, :dω_unit)
             file[String(name)] = getfield(res, name)
         end
         for iΩ in axes(res.history, 1), iT in axes(res.history, 2)
@@ -413,7 +410,7 @@ function load_scgd0_ladder(filename)
                       σ_iter = file["history/σ_iter/$(iΩ)_$(iT)"])
                    for iΩ in eachindex(Ωs), iT in eachindex(Tlist)]
         SCGD0LadderResult(Ωs, Tlist, file["μ"], file["σ_bubble"], file["σ_ladder"],
-            file["converged"], file["niter"], history, file["dω_shift"],
+            file["converged"], file["niter"], history, file["dω_unit"],
             haskey(file, "J") ? file["J"] : nothing)
     end
 end

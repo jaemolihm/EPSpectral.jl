@@ -37,8 +37,8 @@ function contour_bubble(res, iT, Ω)
     v = reduce(hcat, el_i.vs)
     J0 = zeros(ComplexF64, length(ωs), 4, 3, 2, ni)
     EPSpectral.attach_greens_to_bare_vertex!(J0, Gm, v, Gp)
-    Wω = EPSpectral.trapezoid_weights(ωs)
-    EPSpectral.conductivity_from_vertex(J0, v, state_weights(el_i), Wω, Ω, res.Tlist[iT])
+    ωs_weights = EPSpectral.trapezoid_weights(ωs)
+    EPSpectral.conductivity_from_vertex(J0, v, state_weights(el_i), ωs_weights, Ω, res.Tlist[iT])
 end
 
 @testset "ladder bubble from the contour" begin
@@ -104,7 +104,7 @@ end
         model_h = EP.holstein_model(; t, λ = 0.5, ω₀ = ω0, dimension = 1, verbose = false)
         occ_h = ElectronOccupationParams(; Tlist = [0.1, 0.2], nlist = 0.0, nelec = 1,
             volume = model_h.volume, spin_degeneracy = 2, type = :Metal)
-        holstein = run_scgd0(model_h, (nk, 1, 1), (-Inf, Inf); occ = occ_h, ωs = -4.0:0.02:4.0,
+        holstein = run_scgd0(model_h, (nk, 1, 1), (-Inf, Inf); occ = occ_h, ωs = FrequencyGrid(-4.0:0.02:4.0),
             η_init = 0.05, tol = 1e-6, verbosity = 0)
         (; model, nk, window, ωs, occ, η_init, η_min) = pb_scgd0_fixture()
         pb = @test_logs (:warn, r"not converged") match_mode = :any run_scgd0(model, nk, window;

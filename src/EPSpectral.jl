@@ -21,7 +21,8 @@ include("scgd0.jl")
 include("ladder_kernel.jl")
 include("ladder.jl")
 
-export run_scgd0, SCGD0Result, save_scgd0, load_scgd0, kramers_kronig, graded_frequency_grid
+export run_scgd0, SCGD0Result, save_scgd0, load_scgd0, kramers_kronig, FrequencyGrid,
+    graded_frequency_grid
 export run_scgd0_ladder, SCGD0LadderResult, save_scgd0_ladder, load_scgd0_ladder
 
 end

@@ -3,35 +3,43 @@
 
 # `run_scgd0` result `res` and the ladder setup for `model`; `symmetry` is the one the ladder uses
 # (the scGD0 run uses it too).
-function ladder_case(model, nk, window, occ, ωs, res; symmetry, dω_shift = nothing)
+function ladder_case(model, nk, window, occ, res; symmetry)
     backend = EP.CPUBackend()
-    setup = EPSpectral._setup_scgd0(model, nk, window, occ; ωs, dω_dense = minimum(diff(ωs)),
-        backend, symmetry, verbosity = 0, electron_degen_cutoff = EP.electron_degen_cutoff)
-    ladder = EPSpectral._setup_ladder(setup, res, symmetry; dω_shift, backend)
-    (; model, nk, window, occ, ωs, res, setup, ladder, symmetry, ladder.dω_shift)
+    ωs = res.ωs
+    setup = EPSpectral._setup_scgd0(model, nk, window, occ; ωs, res.ωs_spectral, backend,
+        symmetry, verbosity = 0, electron_degen_cutoff = EP.electron_degen_cutoff)
+    ladder = EPSpectral._setup_ladder(setup, res, symmetry; backend)
+    (; model, nk, window, occ, ωs, res, setup, ladder, symmetry, ladder.dω_unit)
 end
 
+# `res` on the grid `ωs`, which must hold the same number of nodes.
+with_ωs(res, ωs) = EPSpectral.SCGD0Result(ωs, res.ωs_spectral, res.Σ, res.μ, res.el_i, res.Tlist,
+    res.nlist, res.converged, res.history)
+
+# The same nodes on a commensurate step `k` times finer, with `k` times the offsets.
+refine(ωs::FrequencyGrid, k) = FrequencyGrid(ωs.ω_origin, ωs.dω_unit / k, k .* ωs.offsets)
+
 function holstein_ladder_case(; nk = 16, ω0 = 0.173, t = 1.0, λ = 0.5, symmetry = :model,
-        ωs = vcat(-4.0:0.04:-1.0, -0.98:0.02:0.98, 1.0:0.04:4.0), Tlist = [0.1, 0.2])
+        ωs = FrequencyGrid(vcat(-4.0:0.04:-1.0, -0.98:0.02:0.98, 1.0:0.04:4.0)), Tlist = [0.1, 0.2])
     model = EP.holstein_model(; t, λ, ω₀ = ω0, dimension = 1, verbose = false)
     symmetry = symmetry === :model ? model.symmetry : symmetry
     occ = ElectronOccupationParams(; Tlist, nlist = 0.0, nelec = 1, volume = model.volume,
         spin_degeneracy = 2, type = :Metal)
     res = run_scgd0(model, (nk, 1, 1), (-Inf, Inf); occ, ωs, symmetry, η_init = 0.05, tol = 1e-6,
         maxiter = 100, verbosity = 0)
-    ladder_case(model, (nk, 1, 1), (-Inf, Inf), occ, ωs, res; symmetry)
+    ladder_case(model, (nk, 1, 1), (-Inf, Inf), occ, res; symmetry)
 end
 
 function pb_ladder_case(; maxiter = 2)
     (; model, nk, window, ωs, occ, η_init, η_min) = pb_scgd0_fixture()
     res = @test_logs (:warn, r"not converged") match_mode = :any run_scgd0(model, nk, window;
         occ, ωs, η_init, η_min, maxiter, tol = 0.0, verbosity = 0)
-    ladder_case(model, nk, window, occ, ωs, res; symmetry = model.symmetry)
+    ladder_case(model, nk, window, occ, res; symmetry = model.symmetry)
 end
 
-# The same case on the shift step `dω_shift`.
-with_shift_step(case, dω_shift) = ladder_case(case.model, case.nk, case.window, case.occ, case.ωs,
-    case.res; case.symmetry, dω_shift)
+# The same case on a shift step `k` times finer.
+with_finer_shift_step(case, k) = ladder_case(case.model, case.nk, case.window, case.occ,
+    with_ωs(case.res, refine(case.ωs, k)); case.symmetry)
 
 # The propagators Gm, Gp of probe frequency Ω at temperature index iT.
 function ladder_propagators(case, iT, Ω)

@@ -15,7 +15,7 @@ begin
     use_gpu = false
     nk = 64
     window = (-Inf, Inf)
-    ωs = collect(-4.0:0.02:4.0)
+    ωs = FrequencyGrid(-4.0:0.02:4.0)
     occ = ElectronOccupationParams(; Tlist = [0.1], nlist = 0.0, nelec = 1, volume = model.volume,
         spin_degeneracy = 2, type = :Metal)
     # η_init and tol in the model's units: the defaults are meV-scale.

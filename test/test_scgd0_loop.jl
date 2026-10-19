@@ -3,7 +3,7 @@
 # multiplet average that changes Σ (the Holstein Σ is k-independent).
 @testset "scGD0 loop, 1D Holstein by hand" begin
     nk, t, ω0, g2, T = 64, 1.0, 0.2, 0.2, 0.1
-    ωs = collect(-4.0:0.02:4.0)
+    ωs = FrequencyGrid(collect(-4.0:0.02:4.0))
     η_init, tol = 0.05, 1e-6
     occ_for(nlist) = ElectronOccupationParams(; Tlist = [T], nlist, nelec = 1, volume = 1.0,
         spin_degeneracy = 2, type = :Metal)

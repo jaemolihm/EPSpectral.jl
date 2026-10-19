@@ -7,8 +7,8 @@
     # for every pair.
     g2 = 0.2
     model = EP.holstein_model(; t, λ, ω₀ = ω0, dimension = 1, verbose = false)
-    ωs = collect(-4.0:0.02:4.0)
-    ωs_dense = range(extrema(ωs)...; step = minimum(diff(ωs)))
+    ωs = FrequencyGrid(collect(-4.0:0.02:4.0))
+    ωs_spectral = range(extrema(ωs)...; step = ωs.dω_min)
     η_init, tol = 0.05, 1e-6   # model units (t = 1), not the meV-scale defaults
     # `type = :Metal`: from nlist = 0 and an integer nelec the constructor would infer
     # :Semiconductor.
@@ -38,7 +38,7 @@
             @test res.converged == [true]
             @test maximum(abs, res.Σ .- res.Σ[:, 1:1, :]) < 1e-12
             μ0 = holstein_1d_bare_μ(; nk, t, T, n_target, spin_degeneracy = 2)
-            Σ_ref, μ_ref = holstein_1d_local_scgd0(ωs, ωs_dense; nk, t, ω0, g2, T, η_init,
+            Σ_ref, μ_ref = holstein_1d_local_scgd0(ωs, ωs_spectral; nk, t, ω0, g2, T, η_init,
                 μ_start = μ0, niter, fix_μ = false, n_target, spin_degeneracy = 2)
             @test norm(res.Σ[:, 1, 1] - Σ_ref) <= 1e-10 * norm(Σ_ref)
             @test abs(res.μ[1] - μ_ref) < 1e-9
@@ -54,6 +54,10 @@
             for name in fieldnames(SCGD0Result)
                 name === :el_i && continue
                 @test isequal(getfield(res_loaded, name), getfield(res, name))
+            end
+            @test res_loaded.ωs isa FrequencyGrid
+            for name in fieldnames(FrequencyGrid)
+                @test isequal(getfield(res_loaded.ωs, name), getfield(res.ωs, name))
             end
             for name in fieldnames(typeof(res.el_i))
                 name === :kpts && continue
@@ -84,6 +88,9 @@
 
     @testset "argument checks" begin
         @test_throws ArgumentError run(occ_for(0.0); fix_μ = true)
+        # A plain vector is refused, with a pointer to the conversion.
+        err = try; run(occ_for(0.0); ωs = collect(ωs)); catch e; e; end
+        @test err isa ArgumentError && occursin("FrequencyGrid(ωs::AbstractVector)", err.msg)
         @test_throws ArgumentError run(ElectronOccupationParams(; Tlist = [T], nlist = 0.0,
             nelec = 1, volume = model.volume, spin_degeneracy = 2, type = :Metal, occ_type = :MV))
         @test_throws ArgumentError run(occ_for(0.0); Σ_init = zeros(ComplexF64, length(ωs), 1, 1))
