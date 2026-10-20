@@ -1,0 +1,9 @@
+coverage:
+  status:
+    # GPU-only code runs on no CI runner, so coverage is reported but never fails a PR.
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
